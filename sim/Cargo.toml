@@ -1,0 +1,8 @@
+[package]
+name = "mv-sim"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+umwelt = { path = "../../umwelt-rs" }
+mildew-common = { path = "../common"}
