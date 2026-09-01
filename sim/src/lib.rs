@@ -1,2 +1,2 @@
-mod game;
+pub mod game;
 mod prefab;

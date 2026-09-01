@@ -8,5 +8,10 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+umwelt.workspace = true
+async-nats.workspace = true
+tokio.workspace = true
+quinn.workspace = true
+rcgen.workspace = true
 postcard.workspace = true
 serde.workspace = true

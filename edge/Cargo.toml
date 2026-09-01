@@ -1,5 +1,5 @@
 [package]
-name = "mv-sim"
+name = "mv-edge"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,3 +12,4 @@ umwelt.workspace = true
 mildew-common.workspace = true
 async-nats.workspace = true
 tokio.workspace = true
+quinn.workspace = true
