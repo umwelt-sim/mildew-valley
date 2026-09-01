@@ -1,25 +1,22 @@
-pub mod crops {
-    use std::time::Duration;
+use std::time::Duration;
+use mildew_common::tags;
+use super::phased::PhasedDef;
 
-use mildew_common::{phased::PhasedEntity, tags};
+pub struct CropPrefabs {
+    pub lettuce: PhasedDef,
+}
 
-use crate::prefab::phased::PhasedEntities;
-
-    pub struct CropPrefabs {
-        pub lettuce: PhasedEntity,        
-    }
-
-    impl CropPrefabs {
-        pub fn new(defs: &PhasedEntities) -> Self {
-            CropPrefabs { lettuce:  
-                defs.define(tags::crops::lettuce::SEED, 
-                    &[
-                        Duration::from_secs(2),
-                        Duration::from_secs(3),
-                        Duration::from_secs(10)
-                    ]
-                )
-            }                 
+impl CropPrefabs {
+    pub fn new() -> Self {
+        CropPrefabs {
+            lettuce: PhasedDef::new(
+                tags::lettuce::SEED,
+                vec![
+                    Duration::from_secs(2),
+                    Duration::from_secs(3),
+                    Duration::from_secs(10),
+                ],
+            ),
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::prefab::{crops::crops::CropPrefabs, phased::PhasedEntities};
+use crops::CropPrefabs;
 
 pub mod crops;
 pub mod phased;
@@ -8,10 +8,9 @@ pub struct Prefabs {
 }
 
 impl Prefabs {
-    pub fn new(tick_hz: u32) -> Self {
-        let defs = PhasedEntities::new(tick_hz);
+    pub fn new() -> Self {
         Prefabs {
-            crops: CropPrefabs::new(&defs),
+            crops: CropPrefabs::new(),
         }
     }
 }

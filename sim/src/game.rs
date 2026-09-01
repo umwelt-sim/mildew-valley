@@ -1,5 +1,4 @@
 use umwelt::{Game, Step};
-
 use crate::prefab::{Prefabs, phased::Phased};
 
 pub struct MildewValleyGame {
@@ -8,9 +7,9 @@ pub struct MildewValleyGame {
 }
 
 impl MildewValleyGame {
-    pub fn new (tick_hz: u32) -> Self {
-        MildewValleyGame { 
-            prefabs: Prefabs::new(tick_hz),
+    pub fn new() -> Self {
+        MildewValleyGame {
+            prefabs: Prefabs::new(),
             phased: Phased::new(),
         }
     }
@@ -18,6 +17,6 @@ impl MildewValleyGame {
 
 impl Game for MildewValleyGame {
     fn step(&mut self, world: &mut Step<'_>) {
-        self.phased.advance_all(world);                
+        self.phased.advance_all(world);
     }
 }
