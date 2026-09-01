@@ -129,52 +129,30 @@ fn phase_at(thresholds: &[u32], age: u32) -> u8 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::prefab::Prefabs;
+    use crate::game::MildewValleyGame;
+    use mildew_common::command::GameCommand;
     use mildew_common::tags;
-    use umwelt::{Game, Pos3, WorldConfig, WorldSimulation};
-
-    struct PhaseHarness {
-        phased: Phased,
-        prefabs: Prefabs,
-        planted: bool,
-        seen: Vec<u16>,
-    }
-
-    impl Game for PhaseHarness {
-        fn step(&mut self, world: &mut Step<'_>) {
-            if !self.planted {
-                self.planted = true;
-                self.phased.spawn(world, Pos3::ZERO, &self.prefabs.crops.lettuce);
-            }
-            self.phased.advance_all(world);
-
-            let tag = world.tag(self.phased.ids[0]).unwrap();
-            if self.seen.last() != Some(&tag) {
-                self.seen.push(tag);
-            }
-        }
-    }
+    use umwelt::{EntityId, WorldConfig, WorldSimulation};
 
     #[test]
-    fn lettuce_grows_through_all_phases() {
+    fn a_plant_lettuce_command_produces_ripe_lettuce() {
         let mut sim = WorldSimulation::new(
             WorldConfig::default(),
-            PhaseHarness {
-                phased: Phased::new(),
-                prefabs: Prefabs::new(),
-                planted: false,
-                seen: Vec::new(),
-            },
+            MildewValleyGame::new(),
         );
 
-        for _ in 0..1000 {
+        let cmd = GameCommand::PlantLettuce { x: 0, y: 0 };
+        sim.deliver_message(EntityId::from_raw(0), &cmd.encode());
+
+        // One tick to process the pending command.
+        sim.tick();
+        let lettuce = EntityId::from_raw(0);
+        assert_eq!(sim.tag(lettuce), Some(tags::lettuce::SEED));
+
+        // Enough ticks for it to ripen (default 20 Hz, transitions at 2s + 3s + 10s = 15s).
+        for _ in 0..400 {
             sim.tick();
         }
-
-        assert_eq!(
-            sim.game().seen,
-            tags::lettuce::RANGE.collect::<Vec<u16>>(),
-        );
+        assert_eq!(sim.tag(lettuce), Some(tags::lettuce::RIPE));
     }
 }

@@ -16,6 +16,7 @@ impl MildewValleyGame {
             pending: Vec::new(),
         }
     }
+
 }
 
 impl Game for MildewValleyGame {
