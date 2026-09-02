@@ -54,6 +54,78 @@ pub fn provider() {
     });
 }
 
+/// A client endpoint that accepts whatever certificate the edge presents.
+///
+/// For local development only. A deployment builds its own endpoint against
+/// the roots its operator chose.
+pub fn game_endpoint(runtime: &tokio::runtime::Handle) -> quinn::Endpoint {
+    provider();
+    let mut tls = quinn::rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(std::sync::Arc::new(TrustAnything))
+        .with_no_client_auth();
+    tls.alpn_protocols = vec![ALPN.to_vec()];
+    let tls =
+        quinn::crypto::rustls::QuicClientConfig::try_from(tls).expect("a TLS 1.3 config");
+
+    let _guard = runtime.enter();
+    let mut endpoint =
+        quinn::Endpoint::client("0.0.0.0:0".parse().expect("a valid address"))
+            .unwrap_or_else(|e| {
+                eprintln!("binding a client socket: {e}");
+                std::process::exit(1);
+            });
+    endpoint.set_default_client_config(quinn::ClientConfig::new(std::sync::Arc::new(tls)));
+    endpoint
+}
+
+#[derive(Debug)]
+struct TrustAnything;
+
+impl quinn::rustls::client::danger::ServerCertVerifier for TrustAnything {
+    fn verify_server_cert(
+        &self,
+        _: &quinn::rustls::pki_types::CertificateDer<'_>,
+        _: &[quinn::rustls::pki_types::CertificateDer<'_>],
+        _: &quinn::rustls::pki_types::ServerName<'_>,
+        _: &[u8],
+        _: quinn::rustls::pki_types::UnixTime,
+    ) -> Result<quinn::rustls::client::danger::ServerCertVerified, quinn::rustls::Error>
+    {
+        Ok(quinn::rustls::client::danger::ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _: &[u8],
+        _: &quinn::rustls::pki_types::CertificateDer<'_>,
+        _: &quinn::rustls::DigitallySignedStruct,
+    ) -> Result<
+        quinn::rustls::client::danger::HandshakeSignatureValid,
+        quinn::rustls::Error,
+    > {
+        Ok(quinn::rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _: &[u8],
+        _: &quinn::rustls::pki_types::CertificateDer<'_>,
+        _: &quinn::rustls::DigitallySignedStruct,
+    ) -> Result<
+        quinn::rustls::client::danger::HandshakeSignatureValid,
+        quinn::rustls::Error,
+    > {
+        Ok(quinn::rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<quinn::rustls::SignatureScheme> {
+        quinn::rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
+}
+
 /// A listening QUIC endpoint with a self-signed certificate.
 ///
 /// Fine for local development. A deployment builds its own endpoint from

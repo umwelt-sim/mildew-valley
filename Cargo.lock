@@ -709,6 +709,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mildew-gameclient"
+version = "0.0.0"
+dependencies = [
+ "mildew-common",
+ "quinn",
+ "tokio",
+ "umwelt",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

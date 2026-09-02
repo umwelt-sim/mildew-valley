@@ -63,7 +63,7 @@ fn main() {
     });
 
     let sink = EdgeSink::new(region, nats, runtime.handle().clone(), Arc::clone(&edges));
-    let mut sim = WorldSimulation::new(cfg, MildewValleyGame::new())
+    let mut sim = WorldSimulation::new(cfg, MildewValleyGame::new(Arc::clone(&inbound)))
         .with_sink(Handoff::new(sink.clone()));
 
     println!("mv-sim: serving {region} over {nats_url}");

@@ -1,0 +1,11 @@
+services:
+  nats:
+    image: nats:2-alpine
+    ports:
+      - "4222:4222"
+
+  sim:
+    build: .
+    command: mv-sim --nats nats://nats:4222
+    depends_on:
+      - nats

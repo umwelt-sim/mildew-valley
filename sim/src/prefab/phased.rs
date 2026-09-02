@@ -129,16 +129,19 @@ fn phase_at(thresholds: &[u32], age: u32) -> u8 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use crate::game::MildewValleyGame;
     use mildew_common::command::GameCommand;
     use mildew_common::tags;
+    use umwelt::net::{Edges, Inbound};
     use umwelt::{EntityId, WorldConfig, WorldSimulation};
 
     #[test]
     fn a_plant_lettuce_command_produces_ripe_lettuce() {
+        let inbound = Arc::new(Inbound::new(Arc::new(Edges::new())));
         let mut sim = WorldSimulation::new(
             WorldConfig::default(),
-            MildewValleyGame::new(),
+            MildewValleyGame::new(inbound),
         );
 
         let cmd = GameCommand::PlantLettuce { x: 0, y: 0 };

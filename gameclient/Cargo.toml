@@ -1,0 +1,18 @@
+[package]
+name = "mildew-gameclient"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "mildew"
+path = "src/main.rs"
+
+[dependencies]
+umwelt.workspace = true
+mildew-common.workspace = true
+tokio.workspace = true
+quinn.workspace = true

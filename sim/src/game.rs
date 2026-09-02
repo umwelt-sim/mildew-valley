@@ -1,22 +1,26 @@
+use std::sync::Arc;
+
+use umwelt::net::Inbound;
 use umwelt::{EntityId, Game, Pos3, Step};
 use mildew_common::command::GameCommand;
 use crate::prefab::{Prefabs, phased::Phased};
 
 pub struct MildewValleyGame {
+    inbound: Arc<Inbound>,
     prefabs: Prefabs,
     phased: Phased,
     pending: Vec<(EntityId, GameCommand)>,
 }
 
 impl MildewValleyGame {
-    pub fn new() -> Self {
+    pub fn new(inbound: Arc<Inbound>) -> Self {
         MildewValleyGame {
+            inbound,
             prefabs: Prefabs::new(),
             phased: Phased::new(),
             pending: Vec::new(),
         }
     }
-
 }
 
 impl Game for MildewValleyGame {
@@ -27,6 +31,8 @@ impl Game for MildewValleyGame {
     }
 
     fn step(&mut self, world: &mut Step<'_>) {
+        self.inbound.apply(world);
+
         for (_, cmd) in self.pending.drain(..) {
             match cmd {
                 GameCommand::PlantLettuce { x, y } => {

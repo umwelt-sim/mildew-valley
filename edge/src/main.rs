@@ -10,9 +10,10 @@
 //! ```
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use mildew_common::net;
+use umwelt::net::EdgeStats;
 use umwelt::{EdgeGame, EdgeServer};
 
 struct Game;
@@ -39,24 +40,29 @@ fn main() {
     println!("mv-edge: {} listening on {listen}", server.name());
 
     let stop = AtomicBool::new(false);
-    let mut reported = Instant::now();
+    let mut prev = EdgeStats::default();
     while !stop.load(Ordering::Relaxed) {
-        std::thread::sleep(Duration::from_millis(100));
-        if reported.elapsed() < Duration::from_secs(1) {
-            continue;
-        }
+        std::thread::sleep(Duration::from_millis(250));
         let stats = server.stats();
-        println!(
-            "mv-edge: {} clients | {} entities ({} observing) | \
-             relayed {} undeliverable {} | commands {} refused {}",
-            stats.clients,
-            stats.entities,
-            stats.observers,
-            stats.relayed,
-            stats.undeliverable,
-            stats.commands,
-            stats.refused,
-        );
-        reported = Instant::now();
+        let changed = stats.clients != prev.clients
+            || stats.entities != prev.entities
+            || stats.observers != prev.observers
+            || stats.undeliverable != prev.undeliverable
+            || stats.commands != prev.commands
+            || stats.refused != prev.refused;
+        if changed {
+            println!(
+                "mv-edge: {} clients | {} entities ({} observing) | \
+                 relayed {} undeliverable {} | commands {} refused {}",
+                stats.clients,
+                stats.entities,
+                stats.observers,
+                stats.relayed,
+                stats.undeliverable,
+                stats.commands,
+                stats.refused,
+            );
+            prev = stats;
+        }
     }
 }
