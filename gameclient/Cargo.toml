@@ -7,12 +7,21 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+# The player-facing client: draws the world and the crowd panel.
 [[bin]]
 name = "mildew"
 path = "src/main.rs"
+
+# The headless client this crate started as. Connects, plants one seed, and
+# prints every callback. Reads the wire without opening a window.
+[[bin]]
+name = "mildew-probe"
+path = "src/bin/probe.rs"
 
 [dependencies]
 umwelt.workspace = true
 mildew-common.workspace = true
 tokio.workspace = true
 quinn.workspace = true
+macroquad.workspace = true
+egui-macroquad.workspace = true

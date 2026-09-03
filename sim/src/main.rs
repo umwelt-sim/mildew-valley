@@ -6,7 +6,7 @@
 //!
 //! ```text
 //! cargo run --release -p mv-sim
-//! cargo run --release -p mv-sim -- --region 1 --nats nats://10.0.0.5:4222
+//! cargo run --release -p mv-sim -- --region 2
 //! ```
 
 use std::sync::Arc;

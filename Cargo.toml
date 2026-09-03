@@ -19,6 +19,8 @@ quinn = { version = "0.11", default-features = false, features = ["runtime-tokio
 rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 postcard = { version = "1", features = ["alloc"] }
 serde = { version = "1", features = ["derive"] }
+macroquad = "0.4"
+egui-macroquad = "0.17"
 
 [profile.dev]
 opt-level = 1
