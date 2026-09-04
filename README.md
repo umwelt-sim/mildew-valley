@@ -90,8 +90,7 @@ all 8000 viewers on every tick with nothing late, so that number belongs to the
 generator rather than to what it is measuring.
 
 Where the crowd stands barely changes the cost. The same 4000 bots inside a
-cell, on a cell corner, and near the region's edge, at the largest count where
-`undeliv` is still zero:
+cell, on a cell corner, and near the region's edge:
 
 ```
                   tick_p50 (range)   late% (range)   examined/gather
