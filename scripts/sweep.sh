@@ -27,10 +27,11 @@ SECONDS_PER="${SECONDS_PER:-15}"
 REPEATS="${REPEATS:-3}"
 SPREAD="${SPREAD:-10}"
 PER_CONN="${PER_CONN:-250}"
-# Middle of a 4096 m region. Whether the corner behaves differently is a
-# question to ask on purpose, not one to answer by accident.
-X="${X:-2048}"
-Y="${Y:-2048}"
+# Inside a cell rather than on its edge. 2048 is exactly 16 x 128 m, so a
+# crowd there straddles four cells and splits its own candidate work, which
+# makes the region look cheaper than it is.
+X="${X:-2100}"
+Y="${Y:-2100}"
 TICK_HZ=20
 OUT="${OUT:-/tmp/mv-sweep}"
 mkdir -p "$OUT"

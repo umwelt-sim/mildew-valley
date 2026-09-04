@@ -60,14 +60,14 @@ one place, so every observer can see every other entity.
 
 ```
    bots      tick_p50 (range)     late% (range)   upd/obs   gap_mean   kept%    undeliv
-   1000      2.73 (2.71-2.75)     0.0 (0.0-0.0)        79       50.0      19          0
-   2000      4.74 (4.74-4.79)     0.0 (0.0-0.0)        78       50.0      16          0
-   4000   10.64 (10.08-11.43)     0.3 (0.0-1.0)        78       49.9       8          0
-   8000   22.29 (21.91-23.36)     0.3 (0.0-1.0)        62       84.4       4     310864
+   1000      2.84 (2.84-2.88)     0.0 (0.0-0.0)        78       50.0      21          0
+   2000      4.93 (4.86-4.94)     0.0 (0.0-0.3)        77       49.9      19          0
+   4000   10.45 (10.41-10.67)     0.0 (0.0-0.0)        76       50.0       9          0
+   8000   20.84 (20.79-22.51)     0.0 (0.0-0.3)        75       73.3       5     512739
 ```
 
 A tick has 50 ms at 20 Hz. Eight thousand entities standing on top of each
-other cost 22 ms of it and miss almost no deadlines.
+other cost 21 ms of it and miss almost no deadlines.
 
 **Read `undeliv` first.** Observations ride QUIC datagrams and the edge drops
 rather than queues when a client has no room, so a load generator that cannot
@@ -75,18 +75,23 @@ drain looks exactly like a region that cannot send. Where it is nonzero, only
 the sim-side columns — `tick_p50`, `late%`, `kept%` — mean anything. At 8000
 the load generator is the limit, not the region.
 
-Where the crowd stands changes the cost. The same 8000 bots at 200,200 rather
-than the region's middle:
+Where the crowd stands barely changes the cost. The same 8000 bots inside a
+cell, on a cell corner, and near the region's edge:
 
 ```
-              tick_p50 (range)      late% (range)   kept%   candidates/s
-  centre   22.29 (21.91-23.36)     0.3 (0.0-1.0)       4     228,432,929
-  corner   49.77 (49.40-50.38)    48.3 (47.0-52.0)     1     833,846,878
+                  tick_p50 (range)   late% (range)   examined/gather
+  2100,2100    20.84 (20.79-22.51)   0.0 (0.0-0.3)              1468
+  2048,2048    22.39 (22.27-22.64)   0.3 (0.0-0.3)              1602
+   200,200     22.22 (21.95-22.31)   0.0 (0.0-0.3)              1470
 ```
 
-The view radius is 256 m, so at 200,200 every viewer's box reaches 56 m outside
-the region on two sides while at the centre it is wholly inside. Being near a
-boundary costs more rather than less. The mechanism is not yet understood.
+Cells are 128 m, so 2048 falls exactly on a cell corner and a crowd there is
+divided among four cells. Each viewer's gather then walks buckets from four
+cells instead of one, which is the extra work in that row. Standing near the
+region's edge costs nothing measurable.
+
+The sweep's `X` and `Y` default to 2100 for this reason. A crowd sitting on a
+cell corner measures the grid's geometry as much as the region's cost.
 
 Time inside `PayloadSink::send` is 2% of the tick at both 4000 and 8000, so
 neither NATS nor I/O is the constraint.
