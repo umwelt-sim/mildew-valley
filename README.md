@@ -19,6 +19,11 @@ over NATS.
 `wasd` walks. `tab` hides the telemetry panel. Where a crowd is too dense to
 read it collapses into a badge; click one to page through who is standing there.
 
+Keys send a direction and nothing else. The region owns every position and takes
+the steps itself, so what you see of your own farmer is the region's copy coming
+back, the same as everyone else's. Pressing a key shows up a round trip later,
+and releasing one carries you a round trip further.
+
 ### Filling it with people
 
 `mildew-load` runs farmers who walk about and plant, so there is something for
@@ -35,7 +40,7 @@ cargo run --release -p mv-load -- --bots 2000 --per-connection 100
 |---|---|
 | `--bots` | how many farmers, over as many connections as it takes |
 | `--per-connection` | farmers per connection. `1` loads the edge with sockets; a large number loads the region with entities |
-| `--x`, `--y`, `--spread` | where they mill about, and how tightly. The default is close enough that the client's crowd badges trigger |
+| `--x`, `--y`, `--spread` | where they mill about, and how tightly. The default is close enough that the client's crowd badges trigger. A bot steers by the position the region reports back, so where `undeliv` is nonzero it is partly blind and the crowd spreads wider than asked |
 | `--plant-every` | seconds between plantings, `0` to leave the fields alone. Crops are never removed, so a long run with this on is measuring a growing world |
 | `--seed` | the same seed walks the same route twice |
 
@@ -60,14 +65,19 @@ one place, so every observer can see every other entity.
 
 ```
    bots      tick_p50 (range)     late% (range)   upd/obs   gap_mean   kept%    undeliv
-   1000      2.84 (2.84-2.88)     0.0 (0.0-0.0)        78       50.0      21          0
-   2000      4.93 (4.86-4.94)     0.0 (0.0-0.3)        77       49.9      19          0
-   4000   10.45 (10.41-10.67)     0.0 (0.0-0.0)        76       50.0       9          0
-   8000   20.84 (20.79-22.51)     0.0 (0.0-0.3)        75       73.3       5     512739
+   1000      2.54 (2.54-2.61)     0.0 (0.0-0.0)        36       49.9      11          0
+   2000      4.88 (4.24-5.00)     0.0 (0.0-0.0)        78       50.0      20          0
+   4000     9.86 (9.41-10.27)     0.0 (0.0-0.0)        78       50.0      13          0
+   8000   17.21 (16.83-17.46)     0.0 (0.0-0.0)        70       75.2      15      92185
 ```
 
 A tick has 50 ms at 20 Hz. Eight thousand entities standing on top of each
-other cost 21 ms of it and miss almost no deadlines.
+other cost 17 ms of it and miss no deadlines.
+
+`upd/obs` reads low against the packet budget because most of it is no longer
+spent on strangers. The region steps everyone on the same tick, so a viewer's
+nearest few hundred hold still between ticks rather than reshuffling, and the
+budget goes on refreshing entities the client already knows.
 
 **Read `undeliv` first.** Observations ride QUIC datagrams and the edge drops
 rather than queues when a client has no room, so a load generator that cannot
@@ -75,14 +85,15 @@ drain looks exactly like a region that cannot send. Where it is nonzero, only
 the sim-side columns — `tick_p50`, `late%`, `kept%` — mean anything. At 8000
 the load generator is the limit, not the region.
 
-Where the crowd stands barely changes the cost. The same 8000 bots inside a
-cell, on a cell corner, and near the region's edge:
+Where the crowd stands barely changes the cost. The same 4000 bots inside a
+cell, on a cell corner, and near the region's edge, at the largest count where
+`undeliv` is still zero:
 
 ```
                   tick_p50 (range)   late% (range)   examined/gather
-  2100,2100    20.84 (20.79-22.51)   0.0 (0.0-0.3)              1468
-  2048,2048    22.39 (22.27-22.64)   0.3 (0.0-0.3)              1602
-   200,200     22.22 (21.95-22.31)   0.0 (0.0-0.3)              1470
+  2100,2100     9.76 (8.97-9.83)     0.0 (0.0-0.3)               606
+  2048,2048     9.53 (9.24-10.08)    0.0 (0.0-0.0)               681
+   200,200      9.80 (9.14-10.09)    0.0 (0.0-0.0)               599
 ```
 
 Cells are 128 m, so 2048 falls exactly on a cell corner and a crowd there is

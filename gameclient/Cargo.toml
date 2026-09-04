@@ -18,6 +18,12 @@ path = "src/main.rs"
 name = "mildew-probe"
 path = "src/bin/probe.rs"
 
+# Walks in a straight line and reports how often the region tells the walker
+# where it is, and whether the ground covered matches the steps taken.
+[[bin]]
+name = "mildew-cadence"
+path = "src/bin/cadence.rs"
+
 [dependencies]
 umwelt.workspace = true
 mildew-common.workspace = true

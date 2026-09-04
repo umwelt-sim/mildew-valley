@@ -36,7 +36,7 @@ use umwelt::{EdgeClient, EntityKind, Fixed, Pos3, RegionId};
 use render::Camera;
 use world::World;
 
-use mildew_common::pace::WALK_M_PER_SEC as WALK;
+use mildew_common::command::{GameCommand, Heading};
 
 /// Meters on a side of the squares crowds are counted in. A little wider than
 /// a person needs, so a knot standing shoulder to shoulder lands in one cell.
@@ -106,14 +106,16 @@ async fn main() {
     // Before the first frame: egui binds new fonts at the start of a frame, so
     // a style naming them cannot be installed from inside one.
     ui::install(&ui_state);
-    let mut since_send = 0.0f32;
+    // The last heading the edge was told. A held key is one message, not one
+    // per frame, so only a change is worth sending.
+    let mut sent_heading: Option<Heading> = None;
 
     loop {
-        let dt = get_frame_time();
         let elapsed = get_time() as f32;
         let now = Instant::now();
 
-        // Walk. Diagonals are normalized so a corner is not faster than a side.
+        // Walk. Only the direction leaves here: the simulation owns the
+        // position and decides how far a tick of walking covers.
         let (mut dx, mut dy) = (0.0f32, 0.0f32);
         if is_key_down(KeyCode::W) || is_key_down(KeyCode::Up) {
             dy += 1.0;
@@ -127,11 +129,7 @@ async fn main() {
         if is_key_down(KeyCode::D) || is_key_down(KeyCode::Right) {
             dx += 1.0;
         }
-        let len = (dx * dx + dy * dy).sqrt();
-        if len > 0.0 {
-            dx /= len;
-            dy /= len;
-        }
+        let heading = Heading::from_axes(dx, dy);
         if is_key_pressed(KeyCode::Tab) {
             ui_state.show_telemetry = !ui_state.show_telemetry;
         }
@@ -144,25 +142,32 @@ async fn main() {
             ui_state.zoom = (ui_state.zoom - 0.1).max(0.5);
         }
 
-        // Move locally, then tell the edge at the simulation's own rate. Sending
-        // once per frame would put the client's frame rate on the wire.
-        since_send += dt;
-        let moving = len > 0.0;
+        if heading != sent_heading {
+            sent_heading = heading;
+            let cmd = GameCommand::Walk { heading };
+            if let Err(e) = sending.entity_send(me, &cmd.encode()) {
+                eprintln!("walk: {e}");
+            }
+        }
+
+        // The player's own entity comes back from the region like every other
+        // one, so it is drawn from the same interpolated track. Holding a
+        // second position here would only be a guess at what the region already
+        // knows, and the two would disagree about which crop is within reach.
+        let moving = heading.is_some();
         let player = {
             let mut world = shared.lock().expect("the world lock");
-            world.player.0 += dx * WALK * dt;
-            world.player.1 += dy * WALK * dt;
+            if let Some(at) = world.player_entity.and_then(|id| world.entities.get(&id))
+            {
+                world.player = at.at(now);
+            }
+            // Facing follows the keys rather than the reply, so turning on the
+            // spot shows up at once.
             if let Some(turned) = world::Facing::of((dx, dy)) {
                 world.player_facing = turned;
             }
             world.player
         };
-        if since_send >= world::TICK {
-            since_send = 0.0;
-            if let Err(e) = sending.move_entity(me, pos3(player)) {
-                eprintln!("move: {e}");
-            }
-        }
 
         camera.center = player;
 

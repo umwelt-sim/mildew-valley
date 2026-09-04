@@ -19,13 +19,13 @@
 //! cost dominates. `--per-connection 1` loads the edge with connections; a
 //! large value loads the region with entities.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
-use mildew_common::command::GameCommand;
+use mildew_common::command::{GameCommand, Heading};
 use mildew_common::net;
-use mildew_common::pace::{TICK, WALK_M_PER_SEC};
+use mildew_common::pace::TICK;
 use umwelt::{
     ClientGame, ClientHandle, EdgeClient, EntityHandle, EntityId, EntityKind, Fixed, Pos3,
     RegionId, TickObservation,
@@ -87,16 +87,29 @@ fn main() {
     // One loop for every swarm, paced to the simulation. Sending faster would
     // put this process's scheduling on the wire instead of a walk.
     let step = Duration::from_secs_f32(TICK);
-    let mut moves: Vec<(EntityHandle, Pos3)> = Vec::with_capacity(per_conn);
     let mut next = Instant::now() + step;
     let mut report = Report::new(bots, conns);
 
     loop {
         for swarm in &mut swarms {
-            moves.clear();
+            let mut walking = 0u64;
+            let mut refused = 0u64;
+            // Copied out so the callback threads are not held up for the length
+            // of a pass over the bots.
+            let anchored = swarm.anchors.lock().expect("not poisoned").clone();
             for bot in &mut swarm.bots {
-                bot.advance(TICK, centre, spread, region_m, &mut rng);
-                moves.push((bot.entity, pos3(bot.pos)));
+                if let Some(&at) = anchored.get(&bot.entity.raw()) {
+                    bot.pos = at;
+                }
+                let heading = bot.advance(TICK, centre, spread, region_m, &mut rng);
+                if heading != bot.sent {
+                    bot.sent = heading;
+                    let cmd = GameCommand::Walk { heading };
+                    if swarm.handle.entity_send(bot.entity, &cmd.encode()).is_err() {
+                        refused += 1;
+                    }
+                }
+                walking += u64::from(heading.is_some());
 
                 if plant_every > 0.0 {
                     bot.plant_in -= TICK;
@@ -112,14 +125,8 @@ fn main() {
                     }
                 }
             }
-            match swarm.handle.move_entities(&moves) {
-                Ok(()) => {
-                    counters.moved.fetch_add(moves.len() as u64, Ordering::Relaxed);
-                }
-                Err(_) => {
-                    counters.refused.fetch_add(moves.len() as u64, Ordering::Relaxed);
-                }
-            }
+            counters.moved.fetch_add(walking, Ordering::Relaxed);
+            counters.refused.fetch_add(refused, Ordering::Relaxed);
         }
 
         report.maybe_print(&counters);
@@ -144,6 +151,7 @@ struct Swarm {
     _client: EdgeClient,
     handle: ClientHandle,
     bots: Vec<Bot>,
+    anchors: Anchors,
 }
 
 impl Swarm {
@@ -173,9 +181,13 @@ impl Swarm {
             .map_err(|e| format!("connecting to {edge}: {e}"))?;
 
         let watching = Arc::clone(counters);
+        let anchors: Anchors = Arc::new(Mutex::new(std::collections::HashMap::new()));
+        let for_watcher = Arc::clone(&anchors);
         let client = EdgeClient::new(conn, runtime.handle().clone(), move |_| Watcher {
             counters: watching,
             last: std::collections::HashMap::new(),
+            mine: std::collections::HashMap::new(),
+            anchors: for_watcher,
         })
         .map_err(|e| format!("opening a stream: {e}"))?;
 
@@ -192,25 +204,41 @@ impl Swarm {
                 target: scatter(centre, spread, region_m, rng),
                 walking_for: 0.0,
                 plant_in: rng.unit() * 8.0,
+                sent: None,
             });
         }
-        Ok(Swarm { _client: client, handle, bots })
+        Ok(Swarm { _client: client, handle, bots, anchors })
     }
 }
 
 /// One farmer.
 struct Bot {
     entity: EntityHandle,
+    /// Where this bot reckons it is. The region owns the real position; this
+    /// takes the same step each tick so the bot can tell when it has arrived
+    /// without being told.
     pos: (f32, f32),
     target: (f32, f32),
     walking_for: f32,
     plant_in: f32,
+    /// The last heading the region was told, so a bot holding a course sends
+    /// nothing.
+    sent: Option<Heading>,
 }
 
 impl Bot {
-    /// Walks one tick's worth toward wherever it is going, and picks somewhere
-    /// new on arrival.
-    fn advance(&mut self, dt: f32, centre: (f32, f32), spread: f32, region_m: f32, rng: &mut Rng) {
+    /// The heading this bot wants this tick, picking somewhere new on arrival.
+    ///
+    /// Advances its own reckoning by the same step the region will take, so the
+    /// two stay together without the bot reading its position back.
+    fn advance(
+        &mut self,
+        dt: f32,
+        centre: (f32, f32),
+        spread: f32,
+        region_m: f32,
+        rng: &mut Rng,
+    ) -> Option<Heading> {
         let (dx, dy) = (self.target.0 - self.pos.0, self.target.1 - self.pos.1);
         let dist = (dx * dx + dy * dy).sqrt();
         self.walking_for += dt;
@@ -218,11 +246,13 @@ impl Bot {
         if dist < ARRIVED_M || self.walking_for > PATIENCE {
             self.target = scatter(centre, spread, region_m, rng);
             self.walking_for = 0.0;
-            return;
+            return None;
         }
-        let step = WALK_M_PER_SEC * dt;
-        self.pos.0 += dx / dist * step;
-        self.pos.1 += dy / dist * step;
+        let heading = Heading::toward(dx, dy)?;
+        let (mx, my) = heading.step_mm();
+        self.pos.0 += mx as f32 / 1000.0;
+        self.pos.1 += my as f32 / 1000.0;
+        Some(heading)
     }
 }
 
@@ -249,16 +279,29 @@ fn scatter(centre: (f32, f32), spread: f32, region_m: f32, rng: &mut Rng) -> (f3
 /// observation per entity per tick, so the gap should sit at the tick period.
 /// A longer gap means the region is running slow, which is what
 /// `Overrun::Dilate` does under load instead of reporting an error.
+/// Where the region last said each of a connection's entities was, by entity
+/// handle.
+///
+/// A bot steers by this rather than by its own reckoning. Reckoning alone drifts:
+/// the region applies a heading a round trip after it is sent, so at every change
+/// of direction the bot's idea of itself runs ahead of the truth, always
+/// outward. Left uncorrected a run asking for a tight crowd measures a loose one.
+type Anchors = Arc<Mutex<std::collections::HashMap<u32, (f32, f32)>>>;
+
 struct Watcher {
     counters: Arc<Counters>,
     /// Last arrival per entity. Owned rather than shared: the callback for one
     /// client is not run concurrently with itself.
     last: std::collections::HashMap<u32, Instant>,
+    /// Which entity each of this connection's handles was given.
+    mine: std::collections::HashMap<u32, EntityId>,
+    anchors: Anchors,
 }
 
 impl ClientGame for Watcher {
-    fn spawned(&mut self, _handle: EntityHandle, _region: RegionId, _entity: EntityId) {
+    fn spawned(&mut self, handle: EntityHandle, _region: RegionId, entity: EntityId) {
         self.counters.spawned.fetch_add(1, Ordering::Relaxed);
+        self.mine.insert(handle.raw(), entity);
     }
 
     fn observed(
@@ -271,6 +314,17 @@ impl ClientGame for Watcher {
         self.counters.packets.fetch_add(1, Ordering::Relaxed);
         let updates = observation.updates().count() as u64;
         self.counters.updates.fetch_add(updates, Ordering::Relaxed);
+
+        // Where the region says this observer is, for the bot to steer by.
+        if let Some(&me) = self.mine.get(&handle.raw()) {
+            for (id, pos, _tag) in observation.updates() {
+                if id == me {
+                    let at = (meters(pos.x), meters(pos.y));
+                    self.anchors.lock().expect("not poisoned").insert(handle.raw(), at);
+                    break;
+                }
+            }
+        }
 
         if let Some(before) = self.last.insert(handle.raw(), now) {
             let gap = now.duration_since(before).as_micros() as u64;
@@ -375,6 +429,11 @@ fn fixed(meters: f32) -> Fixed {
     Fixed::from_raw((meters * Fixed::ONE.raw() as f32).round() as i32)
 }
 
+/// Back the other way, keeping the fraction that `Fixed::meters` drops.
+fn meters(v: Fixed) -> f32 {
+    v.raw() as f32 / Fixed::ONE.raw() as f32
+}
+
 /// A small deterministic generator, so `--seed` reproduces a run exactly.
 /// Nothing here needs to resist anything; it needs to be the same twice.
 struct Rng(u64);
@@ -440,12 +499,15 @@ mod tests {
             target: (10.0, 0.0),
             walking_for: 0.0,
             plant_in: 0.0,
+            sent: None,
         };
         let start = bot.pos.0;
-        bot.advance(TICK, (100.0, 100.0), 20.0, 4096.0, &mut rng);
+        let heading = bot.advance(TICK, (100.0, 100.0), 20.0, 4096.0, &mut rng);
+        assert_eq!(heading, Some(Heading::East), "the target is due east");
         let stepped = bot.pos.0 - start;
+        let want = mildew_common::pace::WALK_STEP_MM as f32 / 1000.0;
         assert!(
-            (stepped - WALK_M_PER_SEC * TICK).abs() < 1e-4,
+            (stepped - want).abs() < 1e-4,
             "a tick should cover one tick of walking, covered {stepped}"
         );
 
@@ -466,6 +528,7 @@ mod tests {
             target: (10_000.0, 0.0),
             walking_for: 0.0,
             plant_in: 0.0,
+            sent: None,
         };
         for _ in 0..((PATIENCE / TICK) as usize + 2) {
             bot.advance(TICK, (100.0, 100.0), 20.0, 4096.0, &mut rng);

@@ -176,8 +176,8 @@ pub struct Stats {
 pub struct World {
     /// Every entity a region has told this client about, itself included.
     pub entities: HashMap<EntityId, Track>,
-    /// Where the local player is standing, in meters. Owned by the render
-    /// loop, not the network: the client moves first and tells the edge after.
+    /// Where the local player is standing, in meters. Read from the region's
+    /// own copy of the player's entity: input goes up, position comes down.
     pub player: (f32, f32),
     /// The id the edge assigned this client's entity, once it has one.
     pub player_entity: Option<EntityId>,
