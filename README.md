@@ -65,14 +65,21 @@ one place, so every observer can see every other entity.
 
 ```
    bots      tick_p50 (range)     late% (range)   upd/obs   gap_mean   kept%    undeliv
-   1000      2.48 (2.42-2.66)     0.0 (0.0-0.0)        80       50.0      22          0
-   2000      4.84 (4.59-4.97)     0.0 (0.0-0.0)        79       50.0      21          0
-   4000      9.44 (8.67-9.91)     0.0 (0.0-0.0)        78       50.1      13          0
-   8000   18.40 (18.18-18.93)     0.0 (0.0-0.0)        77      104.7      16          0
+   1000      3.05 (2.95-3.53)     0.0 (0.0-0.0)        79       49.9      21          0
+   2000      6.06 (5.65-6.21)     0.0 (0.0-0.0)        53       50.0      14          0
+   4000   14.07 (12.15-14.30)     0.0 (0.0-0.3)        76       50.1      11          0
+   8000   21.91 (21.59-22.74)     0.3 (0.3-1.0)        75      102.1      12          0
 ```
 
 A tick has 50 ms at 20 Hz. Eight thousand entities standing on top of each
-other cost 18 ms of it and miss no deadlines.
+other cost 22 ms of it and miss almost no deadlines.
+
+About a fifth of that goes on choosing each viewer's ghost set by distance.
+Measured back to back, 8000 bots cost 18.2 ms picking the set by the order a
+cell happened to store its occupants and 22.5 ms picking it by distance. The
+first is not worth having: it hands every viewer in a crowd the same lowest
+entity ids however far off they stand, and never tells a viewer that joined
+late where it is.
 
 **Read `undeliv` first.** Observations ride QUIC datagrams and the edge drops
 rather than queues when a client has no room, so a load generator that cannot
@@ -84,7 +91,7 @@ At 250 the same 8000 bots reported 694,678 undeliverable while the region's own
 cost barely moved. One connection cannot carry 250 observers' datagrams at tick
 rate, and a real client is one observer on one connection.
 
-`gap_mean` is the remaining soft spot. At 8000 it is 104.7 ms against a 50 ms
+`gap_mean` is the remaining soft spot. At 8000 it is 102.1 ms against a 50 ms
 tick, so the load generator is taking delivery at half rate. The region served
 all 8000 viewers on every tick with nothing late, so that number belongs to the
 generator rather than to what it is measuring.
@@ -94,9 +101,9 @@ cell, on a cell corner, and near the region's edge:
 
 ```
                   tick_p50 (range)   late% (range)   examined/gather
-  2100,2100     9.84 (9.66-10.18)    0.0 (0.0-0.0)               533
-  2048,2048    10.43 (9.96-10.44)    0.0 (0.0-0.0)               585
-   200,200      9.83 (9.77-9.91)     0.0 (0.0-0.0)               552
+  2100,2100    14.54 (14.06-14.57)   0.0 (0.0-0.0)               712
+  2048,2048    13.20 (13.15-13.74)   0.0 (0.0-0.0)               714
+   200,200     14.06 (12.33-14.08)   0.0 (0.0-0.0)               691
 ```
 
 Cells are 128 m, so 2048 falls exactly on a cell corner and a crowd there is
