@@ -37,6 +37,7 @@ use render::Camera;
 use world::World;
 
 use mildew_common::command::{GameCommand, Heading};
+use mildew_common::pace::WALK_M_PER_SEC as WALK;
 
 /// Meters on a side of the squares crowds are counted in. A little wider than
 /// a person needs, so a knot standing shoulder to shoulder lands in one cell.
@@ -109,8 +110,12 @@ async fn main() {
     // The last heading the edge was told. A held key is one message, not one
     // per frame, so only a change is worth sending.
     let mut sent_heading: Option<Heading> = None;
+    // Where this client reckons it is standing. Answers the key on the frame it
+    // is pressed, which is the whole reason it exists.
+    let mut reckoned = SPAWN;
 
     loop {
+        let dt = get_frame_time();
         let elapsed = get_time() as f32;
         let now = Instant::now();
 
@@ -130,6 +135,13 @@ async fn main() {
             dx += 1.0;
         }
         let heading = Heading::from_axes(dx, dy);
+        // Diagonals are normalized so a corner is not faster than a side, the
+        // same trade the region makes with its diagonal step.
+        let len = (dx * dx + dy * dy).sqrt();
+        if len > 0.0 {
+            dx /= len;
+            dy /= len;
+        }
         if is_key_pressed(KeyCode::Tab) {
             ui_state.show_telemetry = !ui_state.show_telemetry;
         }
@@ -150,25 +162,27 @@ async fn main() {
             }
         }
 
-        // The player's own entity comes back from the region like every other
-        // one, so it is drawn from the same interpolated track. Holding a
-        // second position here would only be a guess at what the region already
-        // knows, and the two would disagree about which crop is within reach.
+        // Walk on the frame the key is pressed. The region is told a heading and
+        // takes its own steps, so this is a reckoning of where those steps have
+        // got to, not a claim about where anyone is: the region owns the
+        // position and nothing here can move it.
         //
-        // Where it does differ from everyone else: when the samples run out,
-        // this client knows what the region is doing with this entity, because
-        // it asked for it. So the walk carries on rather than standing still.
+        // Continuous rather than in the region's whole ticks. A tick is 225 mm,
+        // which at this magnification is eleven pixels, and stepping it would
+        // jump every third frame at sixty.
+        reckoned.0 += dx * WALK * dt;
+        reckoned.1 += dy * WALK * dt;
+
         let moving = heading.is_some();
         let player = {
             let mut world = shared.lock().expect("the world lock");
-            let walking = heading.map(Heading::velocity_m_per_sec).unwrap_or((0.0, 0.0));
-            let drawn = world
-                .player_entity
-                .and_then(|id| world.entities.get(&id))
-                .map(|track| track.at_walking(now, walking));
-            if let Some(at) = drawn {
-                world.player = at;
+            // The region's own copy, newest rather than interpolated: this is a
+            // check on the reckoning, not something to draw.
+            if let Some(at) = world.player_entity.and_then(|id| world.entities.get(&id))
+            {
+                reckoned = world::reconcile(reckoned, at.latest());
             }
+            world.player = reckoned;
             // Facing follows the keys rather than the reply, so turning on the
             // spot shows up at once.
             if let Some(turned) = world::Facing::of((dx, dy)) {

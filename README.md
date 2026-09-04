@@ -20,9 +20,11 @@ over NATS.
 read it collapses into a badge; click one to page through who is standing there.
 
 Keys send a direction and nothing else. The region owns every position and takes
-the steps itself, so what you see of your own farmer is the region's copy coming
-back, the same as everyone else's. Pressing a key shows up a round trip later,
-and releasing one carries you a round trip further.
+the steps itself, so there is no message a client can send that moves it further
+than a walk. What you see of your own farmer is the client's own reckoning of
+those steps, so a key answers on the frame it is pressed; the region's copy is
+checked against it every frame and taken instead if the two ever end up somewhere
+genuinely different. Everyone else is drawn from the region, two ticks behind.
 
 ### Filling it with people
 
