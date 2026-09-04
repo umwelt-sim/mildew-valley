@@ -1,0 +1,20 @@
+[package]
+name = "mv-load"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+# Deliberately no renderer. This runs on headless boxes, and macroquad would
+# make a graphical toolchain a build requirement for a load test.
+[[bin]]
+name = "mildew-load"
+path = "src/main.rs"
+
+[dependencies]
+umwelt.workspace = true
+mildew-common.workspace = true
+tokio.workspace = true
+quinn.workspace = true

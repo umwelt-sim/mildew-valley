@@ -46,7 +46,9 @@ const DISPLAY_FAMILY: &str = "pack-display";
 
 /// Which badge, if any, the player has open.
 pub struct UiState {
-    pub selected: Option<usize>,
+    /// The cell whose roster is open, named by cell rather than by position in
+    /// the list: the list is sorted by size and reorders as people walk.
+    pub selected: Option<(i32, i32)>,
     pub show_telemetry: bool,
     /// The pack's typeface, if it was installed. Applied on the first frame,
     /// because the egui context only exists inside the draw closure.
@@ -56,6 +58,9 @@ pub struct UiState {
     /// Scales the whole interface. [`TEXT`] is chosen by eye and I cannot see
     /// the screen it lands on, so the size is adjustable without a rebuild.
     pub zoom: f32,
+    /// Cells currently carrying a badge. Held across frames so one can stay up
+    /// while its crowd hovers around the threshold instead of blinking.
+    showing: std::collections::HashSet<(i32, i32)>,
 }
 
 impl Default for UiState {
@@ -66,6 +71,7 @@ impl Default for UiState {
             font: None,
             notices: Vec::new(),
             zoom: 1.0,
+            showing: std::collections::HashSet::new(),
         }
     }
 }
@@ -183,19 +189,29 @@ pub fn draw(
     drawn: usize,
     elapsed: f32,
 ) {
-    // A cluster the player had open can vanish between frames, when the crowd
-    // thins or walks out of view. Drop the selection rather than index past
-    // the end of the list.
-    if state.selected.is_some_and(|i| i >= clusters.len()) {
+    // A crowd the player had open can disperse or walk out of view. Forget it
+    // rather than leave a panel describing nobody.
+    if state.selected.is_some_and(|cell| !clusters.iter().any(|c| c.cell == cell)) {
         state.selected = None;
+    }
+
+    // Decide what carries a badge before drawing, so the answer is the same
+    // for the badge and for the panel it opens.
+    state.showing.retain(|cell| {
+        clusters.iter().any(|c| c.cell == *cell && c.members.len() >= crate::world::CROWD_KEEP)
+    });
+    for c in clusters.iter().filter(|c| c.members.len() >= crate::world::CROWD_MIN) {
+        state.showing.insert(c.cell);
     }
 
     egui_macroquad::ui(|ctx| {
         if ctx.zoom_factor() != state.zoom {
             ctx.set_zoom_factor(state.zoom);
         }
-        badges(ctx, clusters, camera, state);
-        if let Some(cluster) = state.selected.and_then(|i| clusters.get(i)) {
+        badges(ctx, clusters, camera, &state.showing, &mut state.selected);
+        if let Some(cluster) =
+            state.selected.and_then(|cell| clusters.iter().find(|c| c.cell == cell))
+        {
             roster(ctx, world, camera, cluster);
         }
         if state.show_telemetry {
@@ -234,24 +250,53 @@ fn notices(ctx: &egui::Context, state: &UiState, elapsed: f32) {
         });
 }
 
+/// Where a world point sits in egui's coordinates.
+///
+/// The two disagree. macroquad reports the window in logical points — 1280 by
+/// 720 on a display that is really 2560 by 1440 — and [`Camera::to_screen`]
+/// answers in that space, which is what drawing a sprite wants. egui lays out
+/// in the physical pixels behind it. Handing one to the other puts the whole
+/// interface in a quarter of the screen at half scale.
+///
+/// The factor is taken from the two widths each frame rather than from the
+/// display's scale, so it stays right when the interface is zoomed too.
+fn to_ui(ctx: &egui::Context, camera: &Camera, world: (f32, f32)) -> egui::Pos2 {
+    let (sx, sy) = camera.to_screen(world);
+    let scale = ui_scale(ctx.screen_rect().width(), macroquad::window::screen_width());
+    egui::pos2(sx * scale, sy * scale)
+}
+
+fn ui_scale(egui_width: f32, macroquad_width: f32) -> f32 {
+    if macroquad_width > 0.0 { egui_width / macroquad_width } else { 1.0 }
+}
+
 /// One badge per crowded cell, floating above it.
-fn badges(ctx: &egui::Context, clusters: &[Cluster], camera: &Camera, state: &mut UiState) {
-    for (i, cluster) in clusters.iter().enumerate() {
-        let (sx, sy) = camera.to_screen(cluster.center);
-        if !camera.on_screen((sx, sy), 80.0) {
+fn badges(
+    ctx: &egui::Context,
+    clusters: &[Cluster],
+    camera: &Camera,
+    showing: &std::collections::HashSet<(i32, i32)>,
+    selected: &mut Option<(i32, i32)>,
+) {
+    for cluster in clusters.iter().filter(|c| showing.contains(&c.cell)) {
+        // Culling is a question about the window, so it is asked in
+        // macroquad's space; placement is a question for egui, so it is
+        // answered in egui's.
+        if !camera.on_screen(camera.to_screen(cluster.center), 80.0) {
             continue;
         }
-        let open = state.selected == Some(i);
+        let at = to_ui(ctx, camera, cluster.center);
+        let open = *selected == Some(cluster.cell);
 
-        egui::Area::new(egui::Id::new(("crowd-badge", i)))
-            .fixed_pos(egui::pos2(sx - 34.0, sy - 84.0))
+        egui::Area::new(egui::Id::new(("crowd-badge", cluster.cell)))
+            .fixed_pos(egui::pos2(at.x - 34.0, at.y - 84.0))
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     let label = egui::RichText::new(format!("{} here", cluster.members.len()))
                         .strong()
                         .color(egui::Color32::from_rgb(0xf2, 0xb5, 0x44));
                     if ui.selectable_label(open, label).clicked() {
-                        state.selected = if open { None } else { Some(i) };
+                        *selected = if open { None } else { Some(cluster.cell) };
                     }
                 });
             });
@@ -260,10 +305,11 @@ fn badges(ctx: &egui::Context, clusters: &[Cluster], camera: &Camera, state: &mu
 
 /// Everyone standing in one cell, nearest the player first.
 fn roster(ctx: &egui::Context, world: &World, camera: &Camera, cluster: &Cluster) {
-    let (sx, sy) = camera.to_screen(cluster.center);
+    let at = to_ui(ctx, camera, cluster.center);
     // Put the panel on whichever side of the crowd has room, so it never
     // covers the thing it is describing.
-    let x = if sx > screen_center_x() { sx - 400.0 } else { sx + 44.0 };
+    let middle = ctx.screen_rect().center().x;
+    let x = if at.x > middle { at.x - 400.0 } else { at.x + 44.0 };
 
     let mut ranked: Vec<(f32, EntityId)> = cluster
         .members
@@ -275,7 +321,7 @@ fn roster(ctx: &egui::Context, world: &World, camera: &Camera, cluster: &Cluster
     egui::Window::new("crowd-roster")
         .title_bar(false)
         .resizable(false)
-        .fixed_pos(egui::pos2(x.max(8.0), (sy - 80.0).max(8.0)))
+        .fixed_pos(egui::pos2(x.max(8.0), (at.y - 80.0).max(8.0)))
         .fixed_size(egui::vec2(360.0, 430.0))
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -350,9 +396,6 @@ fn distance(a: (f32, f32), b: (f32, f32)) -> f32 {
     (dx * dx + dy * dy).sqrt()
 }
 
-fn screen_center_x() -> f32 {
-    macroquad::window::screen_width() * 0.5
-}
 
 #[cfg(test)]
 mod tests {
@@ -391,6 +434,21 @@ mod tests {
             dressed_h > plain_h,
             "a telemetry row measured {dressed_h} dressed against {plain_h} plain"
         );
+    }
+
+    /// The two coordinate spaces really do differ, and by the display scale.
+    /// Getting this backwards put every badge in a quarter of the screen.
+    #[test]
+    fn the_ui_scale_bridges_macroquad_and_egui() {
+        // What the instrumented client actually reported: a 1280 point window
+        // on a 2560 pixel display.
+        assert_eq!(ui_scale(2560.0, 1280.0), 2.0);
+        // No scaling on a plain display.
+        assert_eq!(ui_scale(1280.0, 1280.0), 1.0);
+        // Zoomed interface: egui reports fewer points, so the factor drops.
+        assert!((ui_scale(1706.0, 1280.0) - 1.333).abs() < 0.01);
+        // A window reporting nothing must not produce infinity.
+        assert_eq!(ui_scale(2560.0, 0.0), 1.0);
     }
 
     /// Where the pack typeface sits, from the crate root.

@@ -1267,6 +1267,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mv-load"
+version = "0.0.0"
+dependencies = [
+ "mildew-common",
+ "quinn",
+ "tokio",
+ "umwelt",
+]
+
+[[package]]
 name = "mv-sim"
 version = "0.0.0"
 dependencies = [

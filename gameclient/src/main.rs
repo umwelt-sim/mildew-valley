@@ -36,16 +36,11 @@ use umwelt::{EdgeClient, EntityKind, Fixed, Pos3, RegionId};
 use render::Camera;
 use world::World;
 
-/// How fast the player walks, in meters per second.
-const WALK: f32 = 4.5;
+use mildew_common::pace::WALK_M_PER_SEC as WALK;
 
 /// Meters on a side of the squares crowds are counted in. A little wider than
 /// a person needs, so a knot standing shoulder to shoulder lands in one cell.
 const CLUSTER_CELL: f32 = 6.0;
-
-/// How many people have to share a cell before the client stops drawing them
-/// separately and offers a badge instead.
-const CLUSTER_MIN: usize = 6;
 
 /// Where a client that was given no other instruction starts standing.
 const SPAWN: (f32, f32) = (200.0, 200.0);
@@ -176,7 +171,7 @@ async fn main() {
             render::draw_ground(&atlas, &camera);
             let drawn = render::draw_scene(&atlas, &world, &camera, now, elapsed);
             render::draw_player(&atlas, &world, &camera, moving, elapsed);
-            let clusters = world::clusters(&world, now, CLUSTER_CELL, CLUSTER_MIN);
+            let clusters = world::clusters(&world, now, CLUSTER_CELL);
             ui::draw(&world, &clusters, &camera, &mut ui_state, drawn, elapsed);
         }
 

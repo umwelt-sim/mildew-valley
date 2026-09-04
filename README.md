@@ -19,6 +19,39 @@ over NATS.
 `wasd` walks. `tab` hides the telemetry panel. Where a crowd is too dense to
 read it collapses into a badge; click one to page through who is standing there.
 
+### Filling it with people
+
+`mildew-load` runs farmers who walk about and plant, so there is something for
+the engine to carry while you walk among them. It drives the same calls the game
+client does, at the same pace, so a run measures the path a person exercises.
+
+```sh
+cargo run --release -p mv-load                                  # 200 farmers
+cargo run --release -p mv-load -- --bots 500 --spread 6         # a real crush
+cargo run --release -p mv-load -- --bots 2000 --per-connection 100
+```
+
+| | |
+|---|---|
+| `--bots` | how many farmers, over as many connections as it takes |
+| `--per-connection` | farmers per connection. `1` loads the edge with sockets; a large number loads the region with entities |
+| `--x`, `--y`, `--spread` | where they mill about, and how tightly. The default is close enough that the client's crowd badges trigger |
+| `--plant-every` | seconds between plantings, `0` to leave the fields alone. Crops are never removed, so a long run with this on is measuring a growing world |
+| `--seed` | the same seed walks the same route twice |
+
+It prints a line a second, with rates against the wall clock so a run that falls
+behind says so:
+
+```text
+mv-load: 200 farmers on 4 conns | spawned 200 | moves 4000/s |
+         in 4000 packets/s 336000 updates/s | planted 130 | refused 0 | dropped 0
+```
+
+Those two incoming numbers are the interesting ones. Four thousand packets a
+second is 200 farmers each hearing back once a tick. Dividing the updates by the
+packets gives how many neighbours each one is being told about — 84 apiece for
+the run above, which is what 200 people inside a 14 metre circle costs.
+
 ### Without a window
 
 `mildew-probe` is the same client with no rendering: it connects, plants one
@@ -82,4 +115,5 @@ the art is licensed and not committed to this repository.
 | `sim` | `mv-sim` | Owns a region, runs the tick loop, decides what happens |
 | `edge` | `mv-edge` | Relays between clients and regions |
 | `gameclient` | `mildew`, `mildew-probe` | The player-facing client, and a headless one |
-| `common` | | Commands, tags, and the network setup all three share |
+| `loadgen` | `mildew-load` | Fills a region with farmers. No renderer, so it builds on a headless box |
+| `common` | | Commands, tags, pacing, and the network setup they all share |

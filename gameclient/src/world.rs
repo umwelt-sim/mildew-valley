@@ -10,12 +10,7 @@ use std::time::{Duration, Instant};
 
 use umwelt::EntityId;
 
-/// The rate the simulation ticks at. Must match the `tick_hz` the sim is
-/// built with, or interpolation will consistently over- or under-shoot.
-pub const TICK_HZ: f32 = 20.0;
-
-/// One server tick, in seconds.
-pub const TICK: f32 = 1.0 / TICK_HZ;
+pub use mildew_common::pace::TICK;
 
 /// How far behind the newest sample remote entities are drawn.
 ///
@@ -230,9 +225,26 @@ impl World {
 /// One person in a crowd and where they are being drawn, in meters.
 pub type Member = (EntityId, (f32, f32));
 
+/// How many people have to share a cell before it is worth collapsing.
+pub const CROWD_MIN: usize = 6;
+
+/// How far it has to thin out before the badge goes away again.
+///
+/// A crowd sitting exactly on [`CROWD_MIN`] would otherwise flicker a badge in
+/// and out as one person wanders across the boundary.
+pub const CROWD_KEEP: usize = 4;
+
 /// A knot of people standing close enough together that drawing them all
 /// individually tells the player nothing.
 pub struct Cluster {
+    /// Which cell this is, in cell units. Fixed in the world and independent
+    /// of who is standing in it, which is what makes it usable as an identity:
+    /// the badge for a crowd has to stay the same widget from frame to frame
+    /// or a click never lands on the thing it was aimed at.
+    pub cell: (i32, i32),
+    /// The middle of the cell, not the middle of the people in it. A centroid
+    /// recomputed from a hundred and fifty walking farmers drifts continuously,
+    /// and a badge pinned to it is impossible to hit.
     pub center: (f32, f32),
     /// Members and where each is being drawn, so the roster can sort by
     /// distance without re-interpolating.
@@ -240,13 +252,16 @@ pub struct Cluster {
 }
 
 /// Buckets people into `cell`-meter squares and returns every square holding
-/// at least `min` of them, largest first.
+/// at least [`CROWD_KEEP`] of them, largest first.
 ///
 /// A fixed grid rather than true clustering: it is one pass over the entities
 /// with no distance comparisons, and the artifact it produces — two knots
 /// either side of a cell boundary counting separately — costs the player
 /// nothing at the sizes this is used for.
-pub fn clusters(world: &World, now: Instant, cell: f32, min: usize) -> Vec<Cluster> {
+///
+/// The floor is the lower one so the interface can hold a badge steady while
+/// the crowd under it hovers around [`CROWD_MIN`].
+pub fn clusters(world: &World, now: Instant, cell: f32) -> Vec<Cluster> {
     let mut buckets: HashMap<(i32, i32), Vec<Member>> = HashMap::new();
     for (id, track) in &world.entities {
         if !is_player(track.tag) {
@@ -258,16 +273,17 @@ pub fn clusters(world: &World, now: Instant, cell: f32, min: usize) -> Vec<Clust
     }
 
     let mut found: Vec<Cluster> = buckets
-        .into_values()
-        .filter(|members| members.len() >= min)
-        .map(|members| {
-            let n = members.len() as f32;
-            let cx = members.iter().map(|m| m.1.0).sum::<f32>() / n;
-            let cy = members.iter().map(|m| m.1.1).sum::<f32>() / n;
-            Cluster { center: (cx, cy), members }
+        .into_iter()
+        .filter(|(_, members)| members.len() >= CROWD_KEEP)
+        .map(|(key, members)| Cluster {
+            cell: key,
+            center: ((key.0 as f32 + 0.5) * cell, (key.1 as f32 + 0.5) * cell),
+            members,
         })
         .collect();
-    found.sort_by_key(|c| std::cmp::Reverse(c.members.len()));
+    // Largest first, then by cell, so equal-sized crowds keep a stable order
+    // instead of swapping places between frames.
+    found.sort_by_key(|c| (std::cmp::Reverse(c.members.len()), c.cell));
     found
 }
 
@@ -318,6 +334,52 @@ mod tests {
         assert_eq!(t.latest(), (49.0, 0.0));
     }
 
+    /// A badge has to name the same widget from one frame to the next, or a
+    /// click is dropped between press and release.
+    #[test]
+    fn a_cluster_keeps_its_identity_while_people_move_inside_it() {
+        let base = Instant::now();
+        let mut w = World::new((0.0, 0.0));
+        for k in 0..8 {
+            w.entities.insert(
+                EntityId::from_raw(k),
+                Track::new((2.0 + k as f32 * 0.3, 2.0), PLAYER_TAG, base),
+            );
+        }
+        let before = clusters(&w, base, 8.0);
+        assert_eq!(before.len(), 1);
+
+        // Everyone shuffles about, staying inside the same cell.
+        for k in 0..8 {
+            w.entities.get_mut(&EntityId::from_raw(k)).unwrap().push(
+                (1.0 + (7 - k) as f32 * 0.4, 3.0),
+                PLAYER_TAG,
+                base,
+            );
+        }
+        let after = clusters(&w, base, 8.0);
+        assert_eq!(after.len(), 1);
+        assert_eq!(before[0].cell, after[0].cell, "the cell must not move");
+        assert_eq!(before[0].center, after[0].center, "the badge must not drift");
+    }
+
+    /// Equal-sized crowds must not trade places, or the selected one changes
+    /// under the player.
+    #[test]
+    fn equal_sized_crowds_keep_a_stable_order() {
+        let base = Instant::now();
+        let mut w = World::new((0.0, 0.0));
+        for k in 0..12 {
+            let at = if k < 6 { (2.0, 2.0) } else { (40.0, 40.0) };
+            w.entities.insert(EntityId::from_raw(k), Track::new(at, PLAYER_TAG, base));
+        }
+        let order: Vec<_> = clusters(&w, base, 8.0).iter().map(|c| c.cell).collect();
+        for _ in 0..8 {
+            let again: Vec<_> = clusters(&w, base, 8.0).iter().map(|c| c.cell).collect();
+            assert_eq!(order, again, "the order changed with nothing moving");
+        }
+    }
+
     #[test]
     fn only_crowded_cells_become_clusters() {
         let base = Instant::now();
@@ -331,7 +393,7 @@ mod tests {
         }
         w.entities.insert(EntityId::from_raw(99), Track::new((80.0, 80.0), PLAYER_TAG, base));
 
-        let found = clusters(&w, base, 8.0, 4);
+        let found = clusters(&w, base, 8.0);
         assert_eq!(found.len(), 1, "the lone walker must not form a cluster");
         assert_eq!(found[0].members.len(), 6);
     }
@@ -346,6 +408,6 @@ mod tests {
                 Track::new((1.0, 1.0), mildew_common::tags::lettuce::RIPE, base),
             );
         }
-        assert!(clusters(&w, base, 8.0, 4).is_empty(), "a full field is not a crowd");
+        assert!(clusters(&w, base, 8.0).is_empty(), "a full field is not a crowd");
     }
 }

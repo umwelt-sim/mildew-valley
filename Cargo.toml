@@ -1,5 +1,5 @@
 [workspace]
-members = ["common", "edge", "gameclient", "sim"]
+members = ["common", "edge", "gameclient", "loadgen", "sim"]
 resolver = "3"
 
 [workspace.package]
