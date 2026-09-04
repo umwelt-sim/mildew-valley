@@ -1,10 +1,9 @@
 //! Drawing the world.
 //!
-//! Two coordinate spaces meet here. The simulation works in meters; the art is
-//! 16-pixel tiles drawn at a whole-number magnification so pixels stay square.
-//! [`Camera`] converts between them and every draw goes through it. The egui
-//! layer deliberately does not: interface text is drawn at the display's own
-//! resolution, because magnifying it would make it unreadable.
+//! The simulation works in meters. The art is 16-pixel tiles drawn at a
+//! whole-number magnification so pixels stay square. [`Camera`] converts
+//! between the two and every draw goes through it. The egui layer does not:
+//! interface text is drawn at the display's own resolution.
 //!
 //! Every sprite comes out of one atlas, so the ground, the scenery, and a
 //! crowd of any size are a handful of batches rather than one per entity.

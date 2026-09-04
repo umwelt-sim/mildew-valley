@@ -29,19 +29,16 @@ const TEXT: f32 = 17.0;
 /// size; and it needs the room to stay readable at all.
 const DISPLAY: f32 = 28.0;
 
-/// The pack's typeface is used for headings only, and deliberately.
+/// Font family holding the pack's typeface, used for headings only.
 ///
-/// It is a display face wearing pixel-art clothes. Despite the `5x9` on the
-/// file it is not pixel art: fewer than one percent of its outline coordinates
-/// land on a regular grid at any spacing, so the letters were drawn to
-/// resemble pixels rather than snapped to them and every size is antialiased.
-/// It also carries 86 glyphs and no space character.
+/// The pack face is a display face. Despite the `5x9` in the filename it is
+/// not pixel art: fewer than one percent of its outline coordinates land on a
+/// regular grid at any spacing, so every size is antialiased. It has 86 glyphs
+/// and no space character, and its capitals are 411 units on an 800 unit em.
 ///
-/// Set against a panel of numbers being scanned, that is illegible at any size
-/// — enlarging it to seven notches of zoom made it big and no easier to read.
-/// So it labels things and counts things, and egui's own faces carry the text:
-/// a characterful display face over a legible body face, which is the ordinary
-/// arrangement and the one that works.
+/// At body sizes it is unreadable, and enlarging it does not help. Tested at
+/// seven steps of zoom: larger, still unreadable. Headings use it; egui's own
+/// faces carry the body text.
 const DISPLAY_FAMILY: &str = "pack-display";
 
 /// Which badge, if any, the player has open.
@@ -113,10 +110,9 @@ pub fn install(state: &UiState) {
 
 /// Applies the game's own palette and typeface to egui.
 ///
-/// The panels are deliberately not the world's magnification: text is drawn at
-/// the display's resolution so a roster stays readable over pixel art. Only the
-/// colors and the typeface are borrowed, so the interface belongs to the game
-/// without inheriting its blockiness.
+/// Panels are drawn at the display's resolution, not the world's
+/// magnification, so text stays readable over pixel art. Only the colors and
+/// the heading typeface come from the pack.
 fn dress(ctx: &egui::Context, font: Option<&Vec<u8>>) {
     let display = if let Some(bytes) = font {
         let mut fonts = egui::FontDefinitions::default();
@@ -225,10 +221,10 @@ pub fn draw(
 const NOTICE_SECS: f32 = 7.0;
 const NOTICE_FADE: f32 = 1.5;
 
-/// Startup notices, shown once and then out of the way.
+/// Startup notices. Shown for [`NOTICE_SECS`], then dropped.
 ///
-/// The pack's license asks for a credit; it is owed to the player, not to the
-/// margin of every frame, so it says its piece and leaves.
+/// The pack's license requires a credit. Showing it at startup satisfies that
+/// without spending permanent screen space.
 fn notices(ctx: &egui::Context, state: &UiState, elapsed: f32) {
     if elapsed > NOTICE_SECS {
         return;

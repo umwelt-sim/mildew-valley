@@ -81,9 +81,8 @@ pub fn slice9(tx: i32, ty: i32, kind: Tile) -> usize {
 
 /// Whether a fence rail runs across this tile.
 ///
-/// Fields are fenced where they meet open ground, which is what makes a block
-/// read as somebody's farm rather than a patch of dirt. Roads are left clear,
-/// so a lane is never walled off.
+/// Fields are fenced where they meet open ground. Roads are left clear so a
+/// lane is never blocked.
 pub fn fence_at(tx: i32, ty: i32) -> bool {
     tile_at(tx, ty) == Tile::Grass
         && (tile_at(tx, ty - 1) == Tile::Farm || tile_at(tx, ty + 1) == Tile::Farm)

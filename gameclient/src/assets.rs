@@ -6,16 +6,14 @@
 //! rebind once per entity. In one atlas a whole crowd is a single batch no
 //! matter what order it is drawn in.
 //!
-//! Farmers are composited, not tinted. The pack draws its character as a bare
-//! base plus separate, pixel-aligned layers for shoes, trousers, shirt and
-//! hair, in eight or so colors each; stacking those at load gives real
-//! authored variation rather than a palette swap, and costs nothing per frame.
-//! Only skin is recolored, because the pack ships one tone.
+//! Farmers are composited, not tinted. The pack ships a bare base plus
+//! pixel-aligned layers for shoes, trousers, shirt and hair, eight colors
+//! each. Stacking those at load costs nothing per frame. Only skin is
+//! recolored, because the pack ships one tone.
 //!
-//! The art is not in this repository. If it is missing, [`load_or_placeholder`]
-//! falls back to flat shapes so a fresh clone still builds and runs — the
-//! engine is the thing being demonstrated, and it should not take a purchase to
-//! see it work. See `gameclient/ASSETS.md`.
+//! The art is not in this repository. If it is missing,
+//! [`load_or_placeholder`] falls back to flat shapes so a fresh clone still
+//! builds and runs. See `gameclient/ASSETS.md`.
 
 use macroquad::prelude::*;
 
@@ -52,8 +50,7 @@ pub enum Pose {
 const LETTUCE_ROW: u16 = 15;
 const CROP_STAGE_COLS: [u16; 4] = [2, 3, 4, 5];
 
-/// The base sheet's skin, which is the only part of a farmer not supplied as
-/// an authored layer.
+/// The base sheet's skin. The only part of a farmer with no authored layer.
 const SKIN_SRC: [u32; 2] = [0xf6ca9f, 0xd29f70];
 const SKINS: [[u32; 2]; 6] = [
     [0xf6ca9f, 0xd29f70], [0xe8b483, 0xc08e5c], [0xd19a6e, 0xa8744c],
@@ -362,8 +359,8 @@ fn sub(sheet: &Image, x: u16, y: u16, w: u16, h: u16) -> Image {
 
 // ── the stand-in ────────────────────────────────────────────────
 
-/// Flat shapes, so the client runs without the pack installed. Deliberately
-/// plain: it should be obvious that the art is missing rather than broken.
+/// Flat shapes for running without the pack installed. Plain enough that a
+/// missing checkout reads as missing rather than broken.
 pub fn placeholder() -> Atlas {
     const CELL: u16 = 24;
     let mut packer = Packer::new(1024, 512);

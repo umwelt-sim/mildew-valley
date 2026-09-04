@@ -26,7 +26,7 @@ pub const INTERP_DELAY: f32 = 2.0 * TICK;
 const SAMPLES: usize = 8;
 
 /// The tag an entity carries when it is a person rather than a crop. Clients
-/// spawn themselves as observers, which is what tag 0 means here.
+/// spawn as observers, which the simulation tags 0.
 pub const PLAYER_TAG: u16 = 0;
 
 /// Whether a tag marks a person.
@@ -238,13 +238,13 @@ pub const CROWD_KEEP: usize = 4;
 /// individually tells the player nothing.
 pub struct Cluster {
     /// Which cell this is, in cell units. Fixed in the world and independent
-    /// of who is standing in it, which is what makes it usable as an identity:
-    /// the badge for a crowd has to stay the same widget from frame to frame
-    /// or a click never lands on the thing it was aimed at.
+    /// of who is standing in it, so it works as a stable identity. A badge
+    /// whose widget id changes between frames drops clicks, because egui
+    /// matches a press to a release by id.
     pub cell: (i32, i32),
-    /// The middle of the cell, not the middle of the people in it. A centroid
-    /// recomputed from a hundred and fifty walking farmers drifts continuously,
-    /// and a badge pinned to it is impossible to hit.
+    /// The middle of the cell, not the centroid of its members. A centroid
+    /// recomputed each frame from moving entities drifts continuously, which
+    /// makes a badge pinned to it hard to click.
     pub center: (f32, f32),
     /// Members and where each is being drawn, so the roster can sort by
     /// distance without re-interpolating.

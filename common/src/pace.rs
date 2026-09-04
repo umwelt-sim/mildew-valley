@@ -6,9 +6,8 @@
 
 /// The rate the simulation ticks at.
 ///
-/// Must match the `tick_hz` the sim is built with. A client that reports
-/// faster is putting its own frame rate on the wire; one that reports slower
-/// leaves the region interpolating across gaps.
+/// Must match the `tick_hz` the sim is built with. Reporting faster puts the
+/// client's frame rate on the wire; reporting slower leaves gaps.
 pub const TICK_HZ: f32 = 20.0;
 
 /// One server tick, in seconds.
@@ -19,12 +18,11 @@ pub const SPEED_LIMIT_M_PER_SEC: f32 = 40.0;
 
 /// How fast a farmer walks, in meters per second.
 ///
-/// Well under the limit, because this is a walk. The headroom is there for
-/// whatever a cart or a horse turns out to be.
+/// Well under the limit. The headroom is for mounts and vehicles later.
 pub const WALK_M_PER_SEC: f32 = 4.5;
 
-// Checked where it cannot be ignored: a walk that outran the limit would have
-// every move refused, and a test would only say so once someone ran it.
+// Compile-time rather than a test: a walk over the limit would have every
+// move refused, and a test only reports that once someone runs it.
 const _: () = assert!(WALK_M_PER_SEC < SPEED_LIMIT_M_PER_SEC);
 const _: () = assert!(TICK_HZ > 0.0);
 

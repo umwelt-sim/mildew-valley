@@ -7,7 +7,11 @@
 //! ```text
 //! cargo run --release -p mv-sim
 //! cargo run --release -p mv-sim -- --region 2
+//! cargo run --release -p mv-sim -- --ticks 600 --report 5
 //! ```
+//!
+//! `--ticks` runs a fixed number and then exits with a summary, which is what
+//! a sweep uses. `--report` sets how often the tick cost line is printed.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,6 +23,7 @@ use umwelt::{
 };
 
 use mv_sim::game::MildewValleyGame;
+use mv_sim::meter::Meter;
 
 fn config() -> WorldConfig {
     WorldConfig::builder()
@@ -35,6 +40,10 @@ fn main() {
     let nats_url: String = net::arg_or("nats", net::DEFAULT_NATS.to_string());
     let region_raw: u32 = net::arg_or("region", 1);
     let edge_timeout: u64 = net::arg_or("edge-timeout", 5);
+    let report_every: f32 = net::arg_or("report", 1.0f32);
+    // 0 runs until stopped. Anything else exits after that many ticks, so a
+    // sweep gets a bounded run and a summary.
+    let ticks: u32 = net::arg_or("ticks", 0u32);
 
     let cfg = config();
     let region = RegionId::from_raw(region_raw);
@@ -68,9 +77,15 @@ fn main() {
 
     println!("mv-sim: serving {region} over {nats_url}");
 
-    sim.run(
-        Pacing { wait: Wait::Sleep, overrun: Overrun::Dilate, ticks: None },
-        |_, sim| {
+    let mut meter = Meter::new(Duration::from_secs_f32(report_every.max(0.1)));
+    let summary = sim.run(
+        Pacing {
+            wait: Wait::Sleep,
+            overrun: Overrun::Dilate,
+            ticks: (ticks > 0).then_some(ticks),
+        },
+        |report, sim| {
+            meter.observe(&report);
             for (from, body) in inbound.drain_messages() {
                 sim.deliver_message(from, &body);
             }
@@ -78,4 +93,5 @@ fn main() {
             Flow::Continue
         },
     );
+    Meter::summarize(&summary);
 }

@@ -14,11 +14,10 @@
 //!
 //! Needs `mv-edge` and `mv-sim` running behind it.
 //!
-//! Bots are spread over several connections rather than one apiece. A player is
-//! one connection carrying one entity, and at a few hundred of those the cost
-//! of the sockets crowds out the thing being measured. Splitting the two knobs
-//! lets a run lean on whichever matters: `--per-connection 1` to load the edge
-//! with connections, a large value to load the region with entities.
+//! Bots share connections rather than taking one apiece. A real player is one
+//! connection with one entity, but at a few hundred connections the socket
+//! cost dominates. `--per-connection 1` loads the edge with connections; a
+//! large value loads the region with entities.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -173,6 +172,7 @@ impl Swarm {
         let watching = Arc::clone(counters);
         let client = EdgeClient::new(conn, runtime.handle().clone(), move |_| Watcher {
             counters: watching,
+            last: std::collections::HashMap::new(),
         })
         .map_err(|e| format!("opening a stream: {e}"))?;
 
@@ -231,11 +231,18 @@ fn scatter(centre: (f32, f32), spread: f32, rng: &mut Rng) -> (f32, f32) {
     (centre.0 + r * a.cos(), centre.1 + r * a.sin())
 }
 
-/// What the edge tells us back. Nothing here steers a bot: a load generator
-/// that reacted to what it saw would be measuring its own feedback loop. The
-/// numbers exist so a run can say whether the observations arrived.
+/// What the edge tells us back. Nothing here steers a bot; a load generator
+/// that reacted to what it saw would measure its own feedback loop.
+///
+/// It does time the arrivals. A region keeping real time sends one
+/// observation per entity per tick, so the gap should sit at the tick period.
+/// A longer gap means the region is running slow, which is what
+/// `Overrun::Dilate` does under load instead of reporting an error.
 struct Watcher {
     counters: Arc<Counters>,
+    /// Last arrival per entity. Owned rather than shared: the callback for one
+    /// client is not run concurrently with itself.
+    last: std::collections::HashMap<u32, Instant>,
 }
 
 impl ClientGame for Watcher {
@@ -245,13 +252,25 @@ impl ClientGame for Watcher {
 
     fn observed(
         &mut self,
-        _handle: EntityHandle,
+        handle: EntityHandle,
         _region: RegionId,
         observation: &TickObservation<'_>,
     ) {
+        let now = Instant::now();
         self.counters.packets.fetch_add(1, Ordering::Relaxed);
         let updates = observation.updates().count() as u64;
         self.counters.updates.fetch_add(updates, Ordering::Relaxed);
+
+        if let Some(before) = self.last.insert(handle.raw(), now) {
+            let gap = now.duration_since(before).as_micros() as u64;
+            self.counters.gap_sum_us.fetch_add(gap, Ordering::Relaxed);
+            self.counters.gap_count.fetch_add(1, Ordering::Relaxed);
+            self.counters.gap_max_us.fetch_max(gap, Ordering::Relaxed);
+            // Half a tick of slack before a gap counts as late.
+            if gap as f32 > TICK * 1.5 * 1e6 {
+                self.counters.gap_late.fetch_add(1, Ordering::Relaxed);
+            }
+        }
     }
 
     fn disconnected(&mut self) {
@@ -268,6 +287,11 @@ struct Counters {
     packets: AtomicU64,
     updates: AtomicU64,
     dropped: AtomicU64,
+    /// Gaps between consecutive observations of the same entity.
+    gap_sum_us: AtomicU64,
+    gap_count: AtomicU64,
+    gap_max_us: AtomicU64,
+    gap_late: AtomicU64,
 }
 
 /// Prints a line a second, with rates worked out against the wall clock rather
@@ -294,9 +318,22 @@ impl Report {
         let updates = c.updates.load(Ordering::Relaxed);
         let rate = |now: u64, then: u64| (now.saturating_sub(then)) as f64 / elapsed;
 
+        let gaps = c.gap_count.load(Ordering::Relaxed);
+        let mean_gap = if gaps > 0 {
+            c.gap_sum_us.load(Ordering::Relaxed) as f64 / gaps as f64 / 1000.0
+        } else {
+            0.0
+        };
+        let per_observer = if packets > self.marks.1 {
+            (updates - self.marks.2) as f64 / (packets - self.marks.1) as f64
+        } else {
+            0.0
+        };
+
         println!(
-            "mv-load: {} farmers on {} conns | spawned {} | \
-             moves {:.0}/s | in {:.0} packets/s {:.0} updates/s | \
+            "mv-load: {} farmers on {} conns | spawned {} | moves {:.0}/s | \
+             in {:.0} packets/s {:.0} updates/s ({:.0}/observer) | \
+             gap mean {mean_gap:.1}ms max {:.1}ms late {} | \
              planted {} | refused {} | dropped {}",
             self.bots,
             self.conns,
@@ -304,10 +341,15 @@ impl Report {
             rate(moved, self.marks.0),
             rate(packets, self.marks.1),
             rate(updates, self.marks.2),
+            per_observer,
+            c.gap_max_us.load(Ordering::Relaxed) as f64 / 1000.0,
+            c.gap_late.load(Ordering::Relaxed),
             c.planted.load(Ordering::Relaxed),
             c.refused.load(Ordering::Relaxed),
             c.dropped.load(Ordering::Relaxed),
         );
+        // Max is per window, so a spike does not follow the run around.
+        c.gap_max_us.store(0, Ordering::Relaxed);
         self.marks = (moved, packets, updates);
         self.last = Instant::now();
     }
