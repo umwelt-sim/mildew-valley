@@ -54,33 +54,45 @@ the run above, which is what 200 people inside a 14 metre circle costs.
 
 ### What a region costs
 
-`scripts/sweep.sh` runs several bot counts and prints a table. All bots stand
-in one place, so every observer can see every other entity.
+`scripts/sweep.sh` runs several bot counts and prints a table. Every level runs
+three times; the row gives the median and the observed range. All bots stand in
+one place, so every observer can see every other entity.
 
 ```
-    bots   tick_p50   tick_p99    late%  updates/obs   gap_mean     kept%    undeliv/s
-    1000       2.99       4.57      0.0          84       49.9         8            0
-    2000       6.03       7.38      0.0          84       49.9         4            0
-    4000      15.03      18.42      0.0          84       49.9         2            0
-    8000      46.89      82.38     40.0          61      109.0         1        60363
+   bots      tick_p50 (range)     late% (range)   upd/obs   gap_mean   kept%    undeliv
+   1000      2.73 (2.71-2.75)     0.0 (0.0-0.0)        79       50.0      19          0
+   2000      4.74 (4.74-4.79)     0.0 (0.0-0.0)        78       50.0      16          0
+   4000   10.64 (10.08-11.43)     0.3 (0.0-1.0)        78       49.9       8          0
+   8000   22.29 (21.91-23.36)     0.3 (0.0-1.0)        62       84.4       4     310864
 ```
 
-At 20 Hz a tick has 50 ms. Through 4000 the region uses 15 ms of it, misses no
-deadlines, and `undeliv/s` is zero, meaning the edge dropped nothing and every
-observer got 84 updates every 50 ms. At 8000 the region misses 40% of its
-deadlines.
+A tick has 50 ms at 20 Hz. Eight thousand entities standing on top of each
+other cost 22 ms of it and miss almost no deadlines.
 
-`updates/obs` holding at 84 is the packet budget: candidates per observer track
-the bot count, records per observer do not.
+**Read `undeliv` first.** Observations ride QUIC datagrams and the edge drops
+rather than queues when a client has no room, so a load generator that cannot
+drain looks exactly like a region that cannot send. Where it is nonzero, only
+the sim-side columns — `tick_p50`, `late%`, `kept%` — mean anything. At 8000
+the load generator is the limit, not the region.
 
-**Read `undeliv/s` before anything else.** Observations ride QUIC datagrams and
-the edge drops rather than queues when a client has no room, so a client that
-cannot drain shows up as a slow server. Any row with a nonzero value is
-measuring the load generator as much as the region, and only the sim-side
-columns — `tick_p50`, `tick_p99`, `late%`, `kept%` — can be trusted there.
+Where the crowd stands changes the cost. The same 8000 bots at 200,200 rather
+than the region's middle:
+
+```
+              tick_p50 (range)      late% (range)   kept%   candidates/s
+  centre   22.29 (21.91-23.36)     0.3 (0.0-1.0)       4     228,432,929
+  corner   49.77 (49.40-50.38)    48.3 (47.0-52.0)     1     833,846,878
+```
+
+The view radius is 256 m, so at 200,200 every viewer's box reaches 56 m outside
+the region on two sides while at the centre it is wholly inside. Being near a
+boundary costs more rather than less. The mechanism is not yet understood.
+
+Time inside `PayloadSink::send` is 2% of the tick at both 4000 and 8000, so
+neither NATS nor I/O is the constraint.
 
 These were taken with the sim, edge and load generator on one 8-core machine
-over loopback, 20 seconds per level. That is a floor, not a capacity figure.
+over loopback, 15 seconds per level. That is a floor, not a capacity figure.
 
 ### Without a window
 

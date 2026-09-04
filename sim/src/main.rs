@@ -77,7 +77,8 @@ fn main() {
 
     println!("mv-sim: serving {region} over {nats_url}");
 
-    let mut meter = Meter::new(Duration::from_secs_f32(report_every.max(0.1)));
+    let mut meter = Meter::new(Duration::from_secs_f32(report_every.max(0.1)))
+        .with_threads(sim.thread_count());
     let summary = sim.run(
         Pacing {
             wait: Wait::Sleep,

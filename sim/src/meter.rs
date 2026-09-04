@@ -26,6 +26,11 @@ pub struct Meter {
     bytes: u64,
     new_ghosts: u64,
     departed: u64,
+    /// Nanoseconds inside PayloadSink::send, summed across workers. Divided by
+    /// the worker count it is what the tick spent writing to NATS, which
+    /// separates a region that is computing from one that is waiting on I/O.
+    sink_nanos: u64,
+    threads: usize,
 }
 
 impl Meter {
@@ -41,7 +46,15 @@ impl Meter {
             bytes: 0,
             new_ghosts: 0,
             departed: 0,
+            sink_nanos: 0,
+            threads: 1,
         }
+    }
+
+    /// Worker count, for turning summed sink time back into per-tick cost.
+    pub fn with_threads(mut self, threads: usize) -> Meter {
+        self.threads = threads.max(1);
+        self
     }
 
     /// Folds in one tick. Prints and resets when the window is up.
@@ -56,6 +69,7 @@ impl Meter {
         self.bytes += report.stats.bytes;
         self.new_ghosts += report.stats.new_ghosts;
         self.departed += report.stats.departed;
+        self.sink_nanos += report.stats.sink_nanos;
 
         if self.since.elapsed() >= self.every {
             self.print();
@@ -74,6 +88,10 @@ impl Meter {
         // candidates are everything a viewer could have been told about.
         // records are what fitted the packet budget. The ratio is how much
         // priority scoring discarded.
+        // Summed across workers, so divide to get what one tick paid.
+        let sink_ms =
+            self.sink_nanos as f64 / 1e6 / self.threads as f64 / ticks as f64;
+
         let kept = if self.candidates > 0 {
             100.0 * self.records as f64 / self.candidates as f64
         } else {
@@ -84,7 +102,7 @@ impl Meter {
             "mv-sim: {ticks} ticks/{window:.1}s | tick p50 {:.2}ms p99 {:.2}ms max {:.2}ms | \
              late {}/{ticks} worst {:.1}ms | viewers {:.0} | \
              candidates {:.0}/s -> records {:.0}/s ({kept:.0}% kept) | {:.1} MB/s | \
-             ghosts +{} -{}",
+             sink {:.2}ms/tick ({:.0}% of tick) | ghosts +{} -{}",
             ms(pct(&self.took, 0.50)),
             ms(pct(&self.took, 0.99)),
             ms(*self.took.last().expect("non-empty")),
@@ -94,6 +112,8 @@ impl Meter {
             self.candidates as f64 / window,
             self.records as f64 / window,
             self.bytes as f64 / window / 1_000_000.0,
+            sink_ms,
+            100.0 * sink_ms / ms(pct(&self.took, 0.50)).max(f64::MIN_POSITIVE),
             self.new_ghosts,
             self.departed,
         );
@@ -109,6 +129,7 @@ impl Meter {
         self.bytes = 0;
         self.new_ghosts = 0;
         self.departed = 0;
+        self.sink_nanos = 0;
     }
 
     /// One line for a whole run, for a sweep to collect.
