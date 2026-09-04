@@ -39,8 +39,8 @@ cargo run --release -p mv-load -- --bots 2000 --per-connection 100
 | | |
 |---|---|
 | `--bots` | how many farmers, over as many connections as it takes |
-| `--per-connection` | farmers per connection. `1` loads the edge with sockets; a large number loads the region with entities |
-| `--x`, `--y`, `--spread` | where they mill about, and how tightly. The default is close enough that the client's crowd badges trigger. A bot steers by the position the region reports back, so where `undeliv` is nonzero it is partly blind and the crowd spreads wider than asked |
+| `--per-connection` | farmers per connection. `1` loads the edge with sockets; a large number loads the region with entities. Keep it near the default: one connection cannot carry many observers' datagrams at tick rate, and past about 50 the edge starts dropping them |
+| `--x`, `--y`, `--spread` | where they mill about, and how tightly. The default is close enough that the client's crowd badges trigger. A bot steers by the position the region reports back, so a run that drops those is partly blind and its crowd spreads wider than asked |
 | `--plant-every` | seconds between plantings, `0` to leave the fields alone. Crops are never removed, so a long run with this on is measuring a growing world |
 | `--seed` | the same seed walks the same route twice |
 
@@ -65,25 +65,29 @@ one place, so every observer can see every other entity.
 
 ```
    bots      tick_p50 (range)     late% (range)   upd/obs   gap_mean   kept%    undeliv
-   1000      2.54 (2.54-2.61)     0.0 (0.0-0.0)        36       49.9      11          0
-   2000      4.88 (4.24-5.00)     0.0 (0.0-0.0)        78       50.0      20          0
-   4000     9.86 (9.41-10.27)     0.0 (0.0-0.0)        78       50.0      13          0
-   8000   17.21 (16.83-17.46)     0.0 (0.0-0.0)        70       75.2      15      92185
+   1000      2.48 (2.42-2.66)     0.0 (0.0-0.0)        80       50.0      22          0
+   2000      4.84 (4.59-4.97)     0.0 (0.0-0.0)        79       50.0      21          0
+   4000      9.44 (8.67-9.91)     0.0 (0.0-0.0)        78       50.1      13          0
+   8000   18.40 (18.18-18.93)     0.0 (0.0-0.0)        77      104.7      16          0
 ```
 
 A tick has 50 ms at 20 Hz. Eight thousand entities standing on top of each
-other cost 17 ms of it and miss no deadlines.
-
-`upd/obs` reads low against the packet budget because most of it is no longer
-spent on strangers. The region steps everyone on the same tick, so a viewer's
-nearest few hundred hold still between ticks rather than reshuffling, and the
-budget goes on refreshing entities the client already knows.
+other cost 18 ms of it and miss no deadlines.
 
 **Read `undeliv` first.** Observations ride QUIC datagrams and the edge drops
 rather than queues when a client has no room, so a load generator that cannot
 drain looks exactly like a region that cannot send. Where it is nonzero, only
-the sim-side columns — `tick_p50`, `late%`, `kept%` — mean anything. At 8000
-the load generator is the limit, not the region.
+the sim-side columns — `tick_p50`, `late%`, `kept%` — mean anything.
+
+It is zero at every level above, which took lowering `--per-connection` to 50.
+At 250 the same 8000 bots reported 694,678 undeliverable while the region's own
+cost barely moved. One connection cannot carry 250 observers' datagrams at tick
+rate, and a real client is one observer on one connection.
+
+`gap_mean` is the remaining soft spot. At 8000 it is 104.7 ms against a 50 ms
+tick, so the load generator is taking delivery at half rate. The region served
+all 8000 viewers on every tick with nothing late, so that number belongs to the
+generator rather than to what it is measuring.
 
 Where the crowd stands barely changes the cost. The same 4000 bots inside a
 cell, on a cell corner, and near the region's edge, at the largest count where
@@ -91,9 +95,9 @@ cell, on a cell corner, and near the region's edge, at the largest count where
 
 ```
                   tick_p50 (range)   late% (range)   examined/gather
-  2100,2100     9.76 (8.97-9.83)     0.0 (0.0-0.3)               606
-  2048,2048     9.53 (9.24-10.08)    0.0 (0.0-0.0)               681
-   200,200      9.80 (9.14-10.09)    0.0 (0.0-0.0)               599
+  2100,2100     9.84 (9.66-10.18)    0.0 (0.0-0.0)               533
+  2048,2048    10.43 (9.96-10.44)    0.0 (0.0-0.0)               585
+   200,200      9.83 (9.77-9.91)     0.0 (0.0-0.0)               552
 ```
 
 Cells are 128 m, so 2048 falls exactly on a cell corner and a crowd there is

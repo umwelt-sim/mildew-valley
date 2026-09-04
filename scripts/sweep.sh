@@ -26,7 +26,11 @@ LEVELS=("$@")
 SECONDS_PER="${SECONDS_PER:-15}"
 REPEATS="${REPEATS:-3}"
 SPREAD="${SPREAD:-10}"
-PER_CONN="${PER_CONN:-250}"
+# One connection cannot carry many observers' datagrams at tick rate: its send
+# buffer stays full and the edge drops rather than queues. At 250 a run reports
+# hundreds of thousands undeliverable that a real client, being one observer on
+# one connection, would never see. At 50 it is zero.
+PER_CONN="${PER_CONN:-50}"
 # Inside a cell rather than on its edge. 2048 is exactly 16 x 128 m, so a
 # crowd there straddles four cells and splits its own candidate work, which
 # makes the region look cheaper than it is.
