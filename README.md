@@ -52,6 +52,36 @@ second is 200 farmers each hearing back once a tick. Dividing the updates by the
 packets gives how many neighbours each one is being told about — 84 apiece for
 the run above, which is what 200 people inside a 14 metre circle costs.
 
+### What a region costs
+
+`scripts/sweep.sh` runs several bot counts and prints a table. All bots stand
+in one place, so every observer can see every other entity.
+
+```
+    bots   tick_p50   tick_p99    late%  updates/obs   gap_mean     kept%    undeliv/s
+    1000       2.99       4.57      0.0          84       49.9         8            0
+    2000       6.03       7.38      0.0          84       49.9         4            0
+    4000      15.03      18.42      0.0          84       49.9         2            0
+    8000      46.89      82.38     40.0          61      109.0         1        60363
+```
+
+At 20 Hz a tick has 50 ms. Through 4000 the region uses 15 ms of it, misses no
+deadlines, and `undeliv/s` is zero, meaning the edge dropped nothing and every
+observer got 84 updates every 50 ms. At 8000 the region misses 40% of its
+deadlines.
+
+`updates/obs` holding at 84 is the packet budget: candidates per observer track
+the bot count, records per observer do not.
+
+**Read `undeliv/s` before anything else.** Observations ride QUIC datagrams and
+the edge drops rather than queues when a client has no room, so a client that
+cannot drain shows up as a slow server. Any row with a nonzero value is
+measuring the load generator as much as the region, and only the sim-side
+columns — `tick_p50`, `tick_p99`, `late%`, `kept%` — can be trusted there.
+
+These were taken with the sim, edge and load generator on one 8-core machine
+over loopback, 20 seconds per level. That is a floor, not a capacity figure.
+
 ### Without a window
 
 `mildew-probe` is the same client with no rendering: it connects, plants one

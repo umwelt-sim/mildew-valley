@@ -41,10 +41,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-printf '%8s  %9s  %9s  %9s  %7s  %10s  %9s  %8s\n' \
-  bots tick_p50 tick_p99 tick_max late% updates/obs gap_mean kept%
-printf '%8s  %9s  %9s  %9s  %7s  %10s  %9s  %8s\n' \
-  -------- --------- --------- --------- ------- ---------- --------- --------
+# Middle line of those matching a pattern.
+mid_window() {
+  local n
+  n=$(grep -hc "$2" "$1" 2>/dev/null || echo 0)
+  [ "$n" -lt 1 ] && return
+  grep -h "$2" "$1" | sed -n "$(( (n + 1) / 2 ))p"
+}
+
+printf '%8s  %9s  %9s  %7s  %10s  %9s  %8s  %11s\n' \
+  bots tick_p50 tick_p99 late% updates/obs gap_mean kept% undeliv/s
+printf '%8s  %9s  %9s  %7s  %10s  %9s  %8s  %11s\n' \
+  -------- --------- --------- ------- ---------- --------- -------- -----------
 
 for n in "${LEVELS[@]}"; do
   cleanup; sleep 1
@@ -66,20 +74,25 @@ for n in "${LEVELS[@]}"; do
   wait "$sim_pid" 2>/dev/null   # the sim exits on its own after --ticks
   cleanup; sleep 1
 
-  # Last full window from each side.
+  # A window from the middle of the run, not the last. The load generator
+  # keeps printing after the sim exits, so its final windows report zero
+  # arrivals and would be read as a stall.
   sim=$(grep -h 'ticks/' "$OUT/sim-$n.log" | tail -1)
-  load=$(grep -h 'farmers on' "$OUT/load-$n.log" | tail -1)
+  load=$(mid_window "$OUT/load-$n.log" 'farmers on')
+  edge=$(mid_window "$OUT/edge-$n.log" 'clients |')
 
   p50=$(sed -n 's/.*tick p50 \([0-9.]*\)ms.*/\1/p'   <<<"$sim")
   p99=$(sed -n 's/.*p99 \([0-9.]*\)ms.*/\1/p'        <<<"$sim")
-  max=$(sed -n 's/.*max \([0-9.]*\)ms |.*/\1/p'      <<<"$sim")
   kept=$(sed -n 's/.*(\([0-9]*\)% kept).*/\1/p'      <<<"$sim")
   latef=$(grep -h 'run of' "$OUT/sim-$n.log" | sed -n 's/.*late [0-9]* (\([0-9.]*\)%).*/\1/p')
   upo=$(sed -n 's/.*(\([0-9]*\)\/observer).*/\1/p'   <<<"$load")
   gap=$(sed -n 's/.*gap mean \([0-9.]*\)ms.*/\1/p'   <<<"$load")
+  # Datagrams the edge dropped rather than queued, because the client had no
+  # room. Without this a client that cannot drain looks like a slow server.
+  und=$(sed -n 's/.*undeliverable \([0-9]*\) .*/\1/p' <<<"$edge")
 
-  printf '%8s  %9s  %9s  %9s  %7s  %10s  %9s  %8s\n' \
-    "$n" "${p50:--}" "${p99:--}" "${max:--}" "${latef:--}" "${upo:--}" "${gap:--}" "${kept:--}"
+  printf '%8s  %9s  %9s  %7s  %10s  %9s  %8s  %11s\n' \
+    "$n" "${p50:--}" "${p99:--}" "${latef:--}" "${upo:--}" "${gap:--}" "${kept:--}" "${und:--}"
 done
 
 echo

@@ -49,6 +49,8 @@ fn main() {
     let spread: f32 = net::arg_or("spread", 12.0f32);
     let plant_every: f32 = net::arg_or("plant-every", 20.0f32);
     let seed: u64 = net::arg_or("seed", 1u64);
+    // Must match the sim's WorldConfig::region_size_m.
+    let region_m: f32 = net::arg_or("region-size", 4096.0f32);
 
     if bots == 0 || per_conn == 0 {
         eprintln!("--bots and --per-connection must both be at least 1");
@@ -70,7 +72,7 @@ fn main() {
     let mut placed = 0;
     for n in 0..conns {
         let here = (bots - placed).min(per_conn);
-        match Swarm::connect(&edge_addr, region, &runtime, &counters, here, centre, spread, &mut rng)
+        match Swarm::connect(&edge_addr, region, &runtime, &counters, here, centre, spread, region_m, &mut rng)
         {
             Ok(swarm) => swarms.push(swarm),
             Err(e) => {
@@ -93,7 +95,7 @@ fn main() {
         for swarm in &mut swarms {
             moves.clear();
             for bot in &mut swarm.bots {
-                bot.advance(TICK, centre, spread, &mut rng);
+                bot.advance(TICK, centre, spread, region_m, &mut rng);
                 moves.push((bot.entity, pos3(bot.pos)));
 
                 if plant_every > 0.0 {
@@ -154,6 +156,7 @@ impl Swarm {
         count: usize,
         centre: (f32, f32),
         spread: f32,
+        region_m: f32,
         rng: &mut Rng,
     ) -> Result<Swarm, String> {
         let endpoint = net::game_endpoint(runtime.handle());
@@ -179,14 +182,14 @@ impl Swarm {
         let handle = client.handle();
         let mut bots = Vec::with_capacity(count);
         for _ in 0..count {
-            let pos = scatter(centre, spread, rng);
+            let pos = scatter(centre, spread, region_m, rng);
             let entity = handle
                 .spawn(RegionId::from_raw(region), pos3(pos), EntityKind::observer(0))
                 .map_err(|e| format!("spawning: {e}"))?;
             bots.push(Bot {
                 entity,
                 pos,
-                target: scatter(centre, spread, rng),
+                target: scatter(centre, spread, region_m, rng),
                 walking_for: 0.0,
                 plant_in: rng.unit() * 8.0,
             });
@@ -207,13 +210,13 @@ struct Bot {
 impl Bot {
     /// Walks one tick's worth toward wherever it is going, and picks somewhere
     /// new on arrival.
-    fn advance(&mut self, dt: f32, centre: (f32, f32), spread: f32, rng: &mut Rng) {
+    fn advance(&mut self, dt: f32, centre: (f32, f32), spread: f32, region_m: f32, rng: &mut Rng) {
         let (dx, dy) = (self.target.0 - self.pos.0, self.target.1 - self.pos.1);
         let dist = (dx * dx + dy * dy).sqrt();
         self.walking_for += dt;
 
         if dist < ARRIVED_M || self.walking_for > PATIENCE {
-            self.target = scatter(centre, spread, rng);
+            self.target = scatter(centre, spread, region_m, rng);
             self.walking_for = 0.0;
             return;
         }
@@ -225,10 +228,18 @@ impl Bot {
 
 /// Somewhere inside the patch, biased toward the middle so a crowd has a centre
 /// to be dense at rather than a ring.
-fn scatter(centre: (f32, f32), spread: f32, rng: &mut Rng) -> (f32, f32) {
+///
+/// Clamped into the region. A spawn outside it is refused, and a run that
+/// silently placed a third of its bots out of bounds would report the cost of
+/// however many were left.
+fn scatter(centre: (f32, f32), spread: f32, region_m: f32, rng: &mut Rng) -> (f32, f32) {
     let r = spread * rng.unit().sqrt() * rng.unit().max(0.35);
     let a = rng.unit() * std::f32::consts::TAU;
-    (centre.0 + r * a.cos(), centre.1 + r * a.sin())
+    let edge = 2.0;
+    (
+        (centre.0 + r * a.cos()).clamp(edge, region_m - edge),
+        (centre.1 + r * a.sin()).clamp(edge, region_m - edge),
+    )
 }
 
 /// What the edge tells us back. Nothing here steers a bot; a load generator
@@ -391,10 +402,22 @@ mod tests {
     fn the_same_seed_walks_the_same_route() {
         let route = |seed| {
             let mut rng = Rng::new(seed);
-            (0..8).map(|_| scatter((200.0, 200.0), 20.0, &mut rng)).collect::<Vec<_>>()
+            (0..8).map(|_| scatter((200.0, 200.0), 20.0, 4096.0, &mut rng)).collect::<Vec<_>>()
         };
         assert_eq!(route(7), route(7), "a seeded run has to repeat");
         assert_ne!(route(7), route(8), "different seeds must not coincide");
+    }
+
+    /// A spawn outside the region is refused, so the clamp has to hold even
+    /// when the patch is wider than the world.
+    #[test]
+    fn scatter_stays_inside_the_region_however_wide_the_patch() {
+        let mut rng = Rng::new(4);
+        for _ in 0..4000 {
+            let (x, y) = scatter((200.0, 200.0), 5000.0, 4096.0, &mut rng);
+            assert!((0.0..=4096.0).contains(&x), "x out of the region: {x}");
+            assert!((0.0..=4096.0).contains(&y), "y out of the region: {y}");
+        }
     }
 
     #[test]
@@ -402,7 +425,7 @@ mod tests {
         let mut rng = Rng::new(3);
         let centre = (200.0, 200.0);
         for _ in 0..2000 {
-            let (x, y) = scatter(centre, 20.0, &mut rng);
+            let (x, y) = scatter(centre, 20.0, 4096.0, &mut rng);
             let d = ((x - centre.0).powi(2) + (y - centre.1).powi(2)).sqrt();
             assert!(d <= 20.0 + 1e-3, "wandered {d} m from the middle");
         }
@@ -419,7 +442,7 @@ mod tests {
             plant_in: 0.0,
         };
         let start = bot.pos.0;
-        bot.advance(TICK, (0.0, 0.0), 20.0, &mut rng);
+        bot.advance(TICK, (100.0, 100.0), 20.0, 4096.0, &mut rng);
         let stepped = bot.pos.0 - start;
         assert!(
             (stepped - WALK_M_PER_SEC * TICK).abs() < 1e-4,
@@ -428,7 +451,7 @@ mod tests {
 
         // Walk until it arrives; it must then be aiming somewhere else.
         for _ in 0..400 {
-            bot.advance(TICK, (0.0, 0.0), 20.0, &mut rng);
+            bot.advance(TICK, (100.0, 100.0), 20.0, 4096.0, &mut rng);
         }
         assert_ne!(bot.target, (10.0, 0.0), "a bot that arrived must move on");
     }
@@ -445,7 +468,7 @@ mod tests {
             plant_in: 0.0,
         };
         for _ in 0..((PATIENCE / TICK) as usize + 2) {
-            bot.advance(TICK, (0.0, 0.0), 20.0, &mut rng);
+            bot.advance(TICK, (100.0, 100.0), 20.0, 4096.0, &mut rng);
         }
         assert_ne!(bot.target, (10_000.0, 0.0), "patience must run out");
     }
