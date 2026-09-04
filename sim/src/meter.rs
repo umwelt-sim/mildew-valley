@@ -30,6 +30,10 @@ pub struct Meter {
     /// the worker count it is what the tick spent writing to NATS, which
     /// separates a region that is computing from one that is waiting on I/O.
     sink_nanos: u64,
+    sub_cells: u64,
+    whole_cells: u64,
+    examined: u64,
+    biggest_bucket: u64,
     threads: usize,
 }
 
@@ -47,6 +51,10 @@ impl Meter {
             new_ghosts: 0,
             departed: 0,
             sink_nanos: 0,
+            sub_cells: 0,
+            whole_cells: 0,
+            examined: 0,
+            biggest_bucket: 0,
             threads: 1,
         }
     }
@@ -70,6 +78,10 @@ impl Meter {
         self.new_ghosts += report.stats.new_ghosts;
         self.departed += report.stats.departed;
         self.sink_nanos += report.stats.sink_nanos;
+        self.sub_cells += report.stats.sub_cells_walked;
+        self.whole_cells += report.stats.whole_cells_walked;
+        self.examined += report.stats.examined;
+        self.biggest_bucket = self.biggest_bucket.max(report.stats.biggest_bucket);
 
         if self.since.elapsed() >= self.every {
             self.print();
@@ -84,6 +96,9 @@ impl Meter {
         }
         self.took.sort_unstable();
         let ticks = self.took.len();
+
+        // One gather per viewer served, so viewers is the gather count.
+        let gathers = (self.viewers as f64).max(1.0);
 
         // candidates are everything a viewer could have been told about.
         // records are what fitted the packet budget. The ratio is how much
@@ -102,7 +117,9 @@ impl Meter {
             "mv-sim: {ticks} ticks/{window:.1}s | tick p50 {:.2}ms p99 {:.2}ms max {:.2}ms | \
              late {}/{ticks} worst {:.1}ms | viewers {:.0} | \
              candidates {:.0}/s -> records {:.0}/s ({kept:.0}% kept) | {:.1} MB/s | \
-             sink {:.2}ms/tick ({:.0}% of tick) | ghosts +{} -{}",
+             sink {:.2}ms/tick ({:.0}% of tick) | ghosts +{} -{} | \
+             walk {:.1} buckets/gather ({:.0} whole cells) examined {:.0}/gather \
+             biggest bucket {}",
             ms(pct(&self.took, 0.50)),
             ms(pct(&self.took, 0.99)),
             ms(*self.took.last().expect("non-empty")),
@@ -116,6 +133,10 @@ impl Meter {
             100.0 * sink_ms / ms(pct(&self.took, 0.50)).max(f64::MIN_POSITIVE),
             self.new_ghosts,
             self.departed,
+            self.sub_cells as f64 / gathers,
+            self.whole_cells as f64 / ticks as f64,
+            self.examined as f64 / gathers,
+            self.biggest_bucket,
         );
     }
 
@@ -130,6 +151,10 @@ impl Meter {
         self.new_ghosts = 0;
         self.departed = 0;
         self.sink_nanos = 0;
+        self.sub_cells = 0;
+        self.whole_cells = 0;
+        self.examined = 0;
+        self.biggest_bucket = 0;
     }
 
     /// One line for a whole run, for a sweep to collect.
