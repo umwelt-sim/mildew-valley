@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::pace::{WALK_STEP_DIAGONAL_MM, WALK_STEP_MM};
+use crate::pace::{TICK_HZ, WALK_STEP_DIAGONAL_MM, WALK_STEP_MM};
 
 /// Which way a farmer is walking.
 ///
@@ -34,6 +34,16 @@ impl Heading {
             Heading::West => (-S, 0),
             Heading::NorthWest => (-D, D),
         }
+    }
+
+    /// How fast this heading travels, in meters per second on each axis.
+    ///
+    /// The same motion as [`step_mm`](Self::step_mm), against a clock rather
+    /// than against the simulation's cadence. For anything that has to carry a
+    /// walk forward between ticks.
+    pub fn velocity_m_per_sec(self) -> (f32, f32) {
+        let (x, y) = self.step_mm();
+        (x as f32 / 1000.0 * TICK_HZ, y as f32 / 1000.0 * TICK_HZ)
     }
 
     /// The heading a pair of axis inputs names, or `None` when neither axis is
@@ -165,6 +175,21 @@ mod tests {
         assert_eq!(Heading::toward(100.0, 100.0), Some(Heading::NorthEast));
         assert_eq!(Heading::toward(-1.0, -100.0), Some(Heading::South));
         assert_eq!(Heading::toward(0.0, 0.0), None);
+    }
+
+    /// A walk covers the same ground however it is measured.
+    #[test]
+    fn velocity_matches_the_step_it_comes_from() {
+        let (vx, vy) = Heading::East.velocity_m_per_sec();
+        assert!((vx - crate::pace::WALK_M_PER_SEC).abs() < 0.01, "east runs at {vx}");
+        assert_eq!(vy, 0.0);
+
+        let (dx, dy) = Heading::NorthEast.velocity_m_per_sec();
+        let speed = (dx * dx + dy * dy).sqrt();
+        assert!(
+            (speed - crate::pace::WALK_M_PER_SEC).abs() < 0.05,
+            "a diagonal runs at {speed}"
+        );
     }
 
     /// Every heading is reachable from some direction, so nothing in the table

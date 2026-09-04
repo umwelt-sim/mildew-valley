@@ -154,12 +154,20 @@ async fn main() {
         // one, so it is drawn from the same interpolated track. Holding a
         // second position here would only be a guess at what the region already
         // knows, and the two would disagree about which crop is within reach.
+        //
+        // Where it does differ from everyone else: when the samples run out,
+        // this client knows what the region is doing with this entity, because
+        // it asked for it. So the walk carries on rather than standing still.
         let moving = heading.is_some();
         let player = {
             let mut world = shared.lock().expect("the world lock");
-            if let Some(at) = world.player_entity.and_then(|id| world.entities.get(&id))
-            {
-                world.player = at.at(now);
+            let walking = heading.map(Heading::velocity_m_per_sec).unwrap_or((0.0, 0.0));
+            let drawn = world
+                .player_entity
+                .and_then(|id| world.entities.get(&id))
+                .map(|track| track.at_walking(now, walking));
+            if let Some(at) = drawn {
+                world.player = at;
             }
             // Facing follows the keys rather than the reply, so turning on the
             // spot shows up at once.

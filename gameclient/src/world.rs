@@ -25,6 +25,13 @@ pub const INTERP_DELAY: f32 = 2.0 * TICK;
 /// that the oldest are worthless because the draw time has moved on.
 const SAMPLES: usize = 8;
 
+/// How far past the newest sample a known walk is carried, in seconds.
+///
+/// Long enough to cover a dropped packet or two. Past that the region has been
+/// quiet for a reason, and walking further only puts the figure somewhere it
+/// has to be dragged back from.
+const CARRY_LIMIT: f32 = 0.5;
+
 /// The tag an entity carries when it is a person rather than a crop. Clients
 /// spawn as observers, which the simulation tags 0.
 pub const PLAYER_TAG: u16 = 0;
@@ -160,6 +167,36 @@ impl Track {
             );
         }
         newest.1
+    }
+
+    /// Where to draw an entity whose motion the caller knows exactly.
+    ///
+    /// [`at`](Self::at) holds the newest position once the draw time has passed
+    /// it, which shows as a stall and then a jump when the next packet lands.
+    /// The local player is the one entity whose motion is not a guess: it walks
+    /// the heading this client chose, at a speed this client and the region both
+    /// read from the same constant. Carrying that forward is closer to the truth
+    /// than standing still, and it needs nothing walked back when the packet
+    /// arrives.
+    ///
+    /// `velocity` is meters per second on each axis. A standing entity passes
+    /// zero and gets [`at`](Self::at) unchanged.
+    pub fn at_walking(&self, now: Instant, velocity: (f32, f32)) -> (f32, f32) {
+        let held = self.at(now);
+        if velocity == (0.0, 0.0) {
+            return held;
+        }
+        let newest = self.samples.back().expect("a track always holds a sample");
+        let Some(draw_at) = now.checked_sub(Duration::from_secs_f32(INTERP_DELAY)) else {
+            return held;
+        };
+        // None while the samples still straddle the draw time, which is when
+        // interpolation has the answer and there is nothing to carry.
+        let Some(beyond) = draw_at.checked_duration_since(newest.0) else {
+            return held;
+        };
+        let carried = beyond.as_secs_f32().min(CARRY_LIMIT);
+        (held.0 + velocity.0 * carried, held.1 + velocity.1 * carried)
     }
 }
 
@@ -300,6 +337,56 @@ mod tests {
         let base = Instant::now();
         let t = Track::new((5.0, 7.0), PLAYER_TAG, base);
         assert_eq!(t.at(at(base, INTERP_DELAY)), (5.0, 7.0));
+    }
+
+    /// A walk the client asked for carries on when the packets stop, so a
+    /// dropped one costs a little accuracy rather than a stall and a jump.
+    #[test]
+    fn a_known_walk_carries_on_past_the_last_sample() {
+        let base = Instant::now();
+        let t = Track::new((10.0, 0.0), PLAYER_TAG, base);
+        // A tick past the newest sample, once the draw delay is taken off.
+        let now = at(base, INTERP_DELAY + TICK);
+        assert_eq!(t.at(now), (10.0, 0.0), "holding is what it does on its own");
+
+        let east = (4.5, 0.0);
+        let (x, y) = t.at_walking(now, east);
+        assert!((x - (10.0 + 4.5 * TICK)).abs() < 1e-4, "carried to {x}");
+        assert_eq!(y, 0.0, "east does not wander off its axis");
+    }
+
+    #[test]
+    fn a_standing_entity_is_left_where_it_is() {
+        let base = Instant::now();
+        let t = Track::new((10.0, 0.0), PLAYER_TAG, base);
+        let now = at(base, INTERP_DELAY + TICK);
+        assert_eq!(t.at_walking(now, (0.0, 0.0)), t.at(now));
+    }
+
+    /// While the samples still straddle the draw time there is nothing to
+    /// carry, and interpolation has the answer.
+    #[test]
+    fn a_walk_changes_nothing_while_samples_remain() {
+        let base = Instant::now();
+        let mut t = Track::new((0.0, 0.0), PLAYER_TAG, base);
+        t.push((1.0, 0.0), PLAYER_TAG, at(base, TICK));
+        t.push((2.0, 0.0), PLAYER_TAG, at(base, 2.0 * TICK));
+        let now = at(base, INTERP_DELAY + TICK);
+        assert_eq!(t.at_walking(now, (4.5, 0.0)), t.at(now));
+    }
+
+    /// A long silence stops being a walk. Carrying on forever would put the
+    /// figure somewhere it has to be dragged back from.
+    #[test]
+    fn a_carried_walk_gives_up_rather_than_running_away() {
+        let base = Instant::now();
+        let t = Track::new((10.0, 0.0), PLAYER_TAG, base);
+        let far = at(base, INTERP_DELAY + 30.0);
+        let (x, _) = t.at_walking(far, (4.5, 0.0));
+        assert!(
+            (x - (10.0 + 4.5 * CARRY_LIMIT)).abs() < 1e-4,
+            "carried to {x}, which should stop at the limit"
+        );
     }
 
     #[test]
